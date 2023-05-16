@@ -1,5 +1,4 @@
-int v = 2;
+bool v = true;
 print(v);
-if (v == 2) {
-  print("oh yeah");
-}
+v = false;
+print(v);
