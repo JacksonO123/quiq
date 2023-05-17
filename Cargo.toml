@@ -9,4 +9,3 @@ edition = "2021"
 opt-level = 3
 
 [dependencies]
-regex = "1.8.1"

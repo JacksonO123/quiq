@@ -2,22 +2,23 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     helpers::{
-        create_func_call_node, create_make_var_node, create_set_var_node, get_exp_node, is_exp,
-        tokens_to_delimiter,
+        create_bang_bool, create_func_call_node, create_make_var_node, create_set_var_node,
+        get_exp_node, is_exp, tokens_to_delimiter,
     },
+    interpreter::value_from_token,
     tokenizer::{Token, TokenType},
 };
 
-#[derive(Clone, Copy, Debug)]
-pub enum Value<'a> {
-    String(&'a str),
+#[derive(Clone, Debug)]
+pub enum Value {
+    String(String),
     Int(i32),
     Float(f32),
     Double(f64),
     Long(i64),
     Bool(bool),
 }
-impl<'a> Value<'a> {
+impl Value {
     pub fn get_str(&self) -> String {
         match self {
             Value::String(v) => v.to_string(),
@@ -36,10 +37,11 @@ impl<'a> Value<'a> {
 #[derive(Clone, Debug)]
 pub enum AstNodeType<'a> {
     StatementSeq(Vec<Rc<RefCell<AstNode<'a>>>>),
-    MakeVar(Token<'a>, Token<'a>, Box<AstNode<'a>>),
-    SetVar(Token<'a>, Box<AstNode<'a>>),
-    Token(Token<'a>),
-    CallFunc(&'a str, Vec<AstNode<'a>>),
+    MakeVar(Token, Token, Box<AstNode<'a>>),
+    SetVar(Token, Box<AstNode<'a>>),
+    Token(Token),
+    CallFunc(String, Vec<AstNode<'a>>),
+    Bang(Box<AstNode<'a>>),
     Exp(Vec<Box<AstNode<'a>>>),
 }
 
@@ -96,6 +98,7 @@ impl<'a> AstNode<'a> {
                 }
                 res
             }
+            AstNodeType::Bang(node) => "! -> {:?}".to_owned() + node.get_str().as_str(),
         }
     }
 }
@@ -128,11 +131,11 @@ impl<'a> Ast<'a> {
     }
 }
 
-pub fn get_ast_node(tokens: Vec<Token>) -> Option<AstNode> {
+pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
     if tokens.len() == 0 {
         None
     } else if tokens.len() == 1 {
-        Some(AstNode::new(AstNodeType::Token(tokens[0])))
+        Some(AstNode::new(AstNodeType::Token(tokens[0].clone())))
     } else {
         if is_exp(tokens.clone()) {
             let exp_nodes = get_exp_node(tokens.clone());
@@ -147,6 +150,7 @@ pub fn get_ast_node(tokens: Vec<Token>) -> Option<AstNode> {
                 _ => unimplemented!(),
             },
             TokenType::NewLine => None,
+            TokenType::Bang => Some(create_bang_bool(tokens)),
             _ => {
                 panic!("Token not implemented: {:?}", tokens)
             }
@@ -159,7 +163,7 @@ pub fn get_ast_node(tokens: Vec<Token>) -> Option<AstNode> {
     }
 }
 
-pub fn generate_tree(tokens: Vec<Token>) -> Ast {
+pub fn generate_tree<'a>(tokens: Vec<Token>) -> Ast<'a> {
     let mut tree = Ast::new();
 
     let mut i = 0;

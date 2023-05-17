@@ -2,8 +2,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     ast::{Ast, AstNode, AstNodeType, Value},
-    helpers::{eval_exp, set_var_value},
-    tokenizer::{Token, TokenType},
+    helpers::{flatten_exp, set_var_value, ExpValue},
+    tokenizer::{OperatorType, Token, TokenType},
 };
 
 pub struct CustomFunc<'a> {
@@ -19,10 +19,10 @@ impl<'a> CustomFunc<'a> {
 
 pub struct BuiltinFunc<'a> {
     name: &'a str,
-    func: fn(Vec<Value<'a>>) -> Option<Vec<Value<'a>>>,
+    func: fn(Vec<Value>) -> Option<Vec<Value>>,
 }
 impl<'a> BuiltinFunc<'a> {
-    pub fn new(name: &'a str, func: fn(Vec<Value<'a>>) -> Option<Vec<Value<'a>>>) -> Self {
+    pub fn new(name: &'a str, func: fn(Vec<Value>) -> Option<Vec<Value>>) -> Self {
         Self { name, func }
     }
 }
@@ -42,13 +42,13 @@ pub enum VarType {
     Bool,
 }
 
-pub struct VarValue<'a> {
-    pub value: Value<'a>,
+pub struct VarValue {
+    pub value: Value,
     pub scope: usize,
-    pub name: &'a str,
+    pub name: String,
 }
-impl<'a> VarValue<'a> {
-    fn new(name: &'a str, value: Value<'a>, scope: usize) -> Self {
+impl VarValue {
+    fn new(name: String, value: Value, scope: usize) -> Self {
         Self { name, value, scope }
     }
     pub fn get_str(&self) -> String {
@@ -56,7 +56,7 @@ impl<'a> VarValue<'a> {
     }
 }
 
-fn get_var_value<'a>(vars: &mut Vec<VarValue<'a>>, name: &'a str) -> Value<'a> {
+fn get_var_value<'a>(vars: &mut Vec<VarValue>, name: String) -> Value {
     for var in vars.iter() {
         if var.name == name {
             return var.value.clone();
@@ -66,10 +66,10 @@ fn get_var_value<'a>(vars: &mut Vec<VarValue<'a>>, name: &'a str) -> Value<'a> {
 }
 
 pub fn value_from_token<'a>(
-    vars: &mut Vec<VarValue<'a>>,
-    t: Token<'a>,
-    value_type: Option<Token<'a>>,
-) -> Value<'a> {
+    vars: &mut Vec<VarValue>,
+    t: Token,
+    value_type: Option<Token>,
+) -> Value {
     match t.token_type {
         TokenType::Number => {
             if let Some(vt) = value_type {
@@ -105,10 +105,7 @@ pub fn value_from_token<'a>(
                 }
             }
         }
-        TokenType::String => {
-            let val = &t.value[1..t.value.len() - 1];
-            Value::String(val)
-        }
+        TokenType::String => Value::String(t.value.clone()),
         TokenType::Bool => {
             let val = t.value.parse::<bool>().unwrap();
             Value::Bool(val)
@@ -119,12 +116,12 @@ pub fn value_from_token<'a>(
 }
 
 fn call_func<'a>(
-    vars: &mut Vec<VarValue<'a>>,
+    vars: &mut Vec<VarValue>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
-    name: &'a str,
+    name: String,
     args: Vec<AstNode<'a>>,
-) -> Option<Token<'a>> {
+) -> Option<Token> {
     for func in functions.borrow().iter() {
         match func {
             Func::Custom(custom) => {
@@ -155,20 +152,179 @@ fn call_func<'a>(
     None
 }
 
-pub enum EvalValue<'a> {
-    Value(Value<'a>),
-    Token(Token<'a>),
+#[derive(Debug)]
+pub enum EvalValue {
+    Value(Value),
+    Token(Token),
+}
+
+pub fn eval_exp<'a>(
+    vars: &mut Vec<VarValue>,
+    functions: Rc<RefCell<Vec<Func<'a>>>>,
+    scope: usize,
+    exp: Vec<Box<AstNode<'a>>>,
+) -> EvalValue {
+    let mut flattened = flatten_exp(vars, functions, scope, exp);
+
+    // TODO: possibly add exponents
+
+    let pemdas_operations: [OperatorType; 4] = [
+        OperatorType::Mult,
+        OperatorType::Div,
+        OperatorType::Add,
+        OperatorType::Sub,
+    ];
+
+    for current_op in pemdas_operations.iter() {
+        let mut i = 0;
+        while i < flattened.len() {
+            match flattened[i] {
+                ExpValue::Operator(tok) => {
+                    match tok {
+                        TokenType::Operator(op_type) => {
+                            let left = flattened[i - 1].clone();
+                            let right = flattened[i + 1].clone();
+
+                            let left = match left {
+                                ExpValue::Value(val) => val,
+                                ExpValue::Operator(_) => panic!("Unexpected operator"),
+                            };
+                            let right = match right {
+                                ExpValue::Value(val) => val,
+                                ExpValue::Operator(_) => panic!("Unexpected operator"),
+                            };
+
+                            let new_value = match current_op {
+                                OperatorType::Mult => {
+                                    match op_type {
+                                        OperatorType::Mult => match left {
+                                            Value::Int(l) => match right {
+                                                Value::Int(r) => Some(Value::Int(l * r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Float(l) => match right {
+                                                Value::Float(r) => Some(Value::Float(l * r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Double(l) => match right {
+                                                Value::Double(r) => Some(Value::Double(l * r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Long(l) => match right {
+                                                Value::Long(r) => Some(Value::Long(l * r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                        }
+                                        _ => None
+                                    }
+                                }
+                                OperatorType::Div => {
+                                    match op_type {
+                                        OperatorType::Div => match left {
+                                            Value::Int(l) => match right {
+                                                Value::Int(r) => Some(Value::Int(l / r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Float(l) => match right {
+                                                Value::Float(r) => Some(Value::Float(l / r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Double(l) => match right {
+                                                Value::Double(r) => Some(Value::Double(l / r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Long(l) => match right {
+                                                Value::Long(r) => Some(Value::Long(l / r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                        }
+                                        _ => None
+                                    }
+                                }
+                                OperatorType::Add => {
+                                    match op_type {
+                                        OperatorType::Add => match left {
+                                            Value::Int(l) => match right {
+                                                Value::Int(r) => Some(Value::Int(l + r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Float(l) => match right {
+                                                Value::Float(r) => Some(Value::Float(l + r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Double(l) => match right {
+                                                Value::Double(r) => Some(Value::Double(l + r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Long(l) => match right {
+                                                Value::Long(r) => Some(Value::Long(l + r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                        }
+                                        _ => None
+                                    }
+                                }
+                                OperatorType::Sub => {
+                                    match op_type {
+                                        OperatorType::Sub => match left {
+                                            Value::Int(l) => match right {
+                                                Value::Int(r) => Some(Value::Int(l - r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Float(l) => match right {
+                                                Value::Float(r) => Some(Value::Float(l - r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Double(l) => match right {
+                                                Value::Double(r) => Some(Value::Double(l - r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            Value::Long(l) => match right {
+                                                Value::Long(r) => Some(Value::Long(l - r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            },
+                                            _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                        }
+                                        _ => None
+                                    }
+                                }
+                            };
+
+                            if let Some(val) = new_value {
+                                flattened[i - 1] = ExpValue::Value(val);
+                                flattened.remove(i);
+                                flattened.remove(i);
+                                i -= 1;
+                            }
+                        }
+                        _ => {}
+                    };
+                }
+                _ => {}
+            }
+
+            i += 1;
+        }
+    }
+
+    match flattened[0].clone() {
+        ExpValue::Value(val) => EvalValue::Value(val),
+        _ => panic!("Invalid token resulting from expression"),
+    }
 }
 
 /// evaluate ast node
 /// return type is single value
 /// Ex: AstNode::Token(bool) -> Token(bool)
 pub fn eval_node<'a>(
-    vars: &mut Vec<VarValue<'a>>,
+    vars: &mut Vec<VarValue>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
     node: AstNode<'a>,
-) -> Option<EvalValue<'a>> {
+) -> Option<EvalValue> {
     match node.node_type.clone() {
         AstNodeType::StatementSeq(seq) => {
             for node in seq.iter() {
@@ -211,14 +367,31 @@ pub fn eval_node<'a>(
             }
         }
         AstNodeType::Exp(nodes) => Some(eval_exp(vars, Rc::clone(&functions), scope, nodes)),
+        AstNodeType::Bang(node) => {
+            let val = eval_node(vars, functions, scope, node.as_ref().clone());
+            let b = if let Some(value) = val {
+                match value {
+                    EvalValue::Value(v) => match v {
+                        Value::Bool(b) => b,
+                        _ => panic!("Cannot ! non-boolean type"),
+                    },
+                    EvalValue::Token(t) => {
+                        let token_value = value_from_token(vars, t, None);
+                        match token_value {
+                            Value::Bool(b) => b,
+                            _ => panic!("Cannot ! non-boolean type"),
+                        }
+                    }
+                }
+            } else {
+                panic!("Expected value to !");
+            };
+            Some(EvalValue::Value(Value::Bool(!b)))
+        }
     }
 }
 
-pub fn eval<'a>(
-    vars: &mut Vec<VarValue<'a>>,
-    functions: Rc<RefCell<Vec<Func<'a>>>>,
-    tree: Ast<'a>,
-) {
+pub fn eval<'a>(vars: &mut Vec<VarValue>, functions: Rc<RefCell<Vec<Func<'a>>>>, tree: Ast<'a>) {
     let root_node = tree.node.borrow().clone();
     eval_node(vars, functions, 0, root_node);
 }

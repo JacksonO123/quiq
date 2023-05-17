@@ -1,5 +1,3 @@
-use regex::Regex;
-
 use crate::interpreter::VarType;
 
 #[derive(Clone, Copy, Debug)]
@@ -31,99 +29,181 @@ pub enum TokenType {
     Semicolon,
     NewLine,
     Comment,
+    Bang,
 }
 
-#[derive(Debug, Copy, Clone)]
-pub struct Token<'a> {
+#[derive(Debug, Clone)]
+pub struct Token {
     pub token_type: TokenType,
-    pub value: &'a str,
+    pub value: String,
 }
-impl<'a> Token<'a> {
-    fn new(value: &'a str, token_type: TokenType) -> Self {
+impl Token {
+    fn new(value: String, token_type: TokenType) -> Self {
         Self { token_type, value }
     }
-    pub fn get_str(&self) -> &'a str {
-        self.value
+    pub fn get_str(&self) -> String {
+        self.value.clone()
     }
+}
+
+fn get_full_token(chars: Vec<char>, start: usize) -> String {
+    let mut res = String::new();
+
+    let mut dot_found = false;
+    let is_number = chars[0].is_numeric();
+    let mut i = start;
+    while (chars[i].is_alphabetic() && !is_number)
+        || chars[i].is_numeric()
+        || (chars[i] == '.' && !dot_found)
+    {
+        if chars[i] == '.' {
+            dot_found = true;
+        }
+
+        res.push(chars[i]);
+        i += 1;
+    }
+
+    res
+}
+
+fn get_string_token(chars: Vec<char>, start: usize) -> String {
+    let mut res = String::new();
+    let mut i = start + 1;
+    while i < chars.len() {
+        if chars[i] == '"' && i > 0 && chars[i - 1] != '\\' {
+            break;
+        } else {
+            res.push(chars[i]);
+        }
+
+        i += 1;
+    }
+
+    res
+}
+
+fn get_full_line(chars: Vec<char>, start: usize) -> String {
+    let mut res = String::new();
+    let mut i = start;
+    while i < chars.len() {
+        if chars[i] != '\n' {
+            res.push(chars[i]);
+        } else {
+            break;
+        }
+
+        i += 1;
+    }
+
+    res
 }
 
 pub fn tokenize(code: &str) -> Vec<Token> {
-    let reg_str =
-        "\\d+(\\.\\d+)?|\\/\\/.*|\"[\\w\\s]*\"|\\w+|\\(|\\)|,|;|==|=|!=|\\{|\\}|\\n|\\+|-|\\*|/";
-    let re = Regex::new(reg_str).unwrap();
-    let matches: Vec<&str> = re.find_iter(code).map(|m| m.as_str()).collect();
-
     let mut tokens = Vec::new();
-    matches.iter().for_each(|&m| {
-        let token = generate_token(m);
+    let mut i = 0;
+    let chars: Vec<char> = code.chars().collect();
+    while i < chars.len() {
+        let token: Token;
+        if chars[i].is_alphabetic() || chars[i].is_numeric() {
+            let value = get_full_token(chars.clone(), i);
+            i += value.len() - 1;
+
+            let token_type = match value.as_str() {
+                // types
+                "int" => TokenType::Type(VarType::Int),
+                "float" => TokenType::Type(VarType::Float),
+                "double" => TokenType::Type(VarType::Double),
+                "long" => TokenType::Type(VarType::Long),
+                "bool" => TokenType::Type(VarType::Bool),
+                "string" => TokenType::Type(VarType::String),
+                // keywords (add more)
+                "if" => TokenType::Keyword,
+                "else" => TokenType::Keyword,
+                "for" => TokenType::Keyword,
+                "while" => TokenType::Keyword,
+                // booleans
+                "true" => TokenType::Bool,
+                "false" => TokenType::Bool,
+                _ => {
+                    let chars: Vec<char> = value.chars().collect();
+                    // check string, check number
+                    if is_number(value.clone()) {
+                        TokenType::Number
+                    } else if chars[0].is_alphabetic() {
+                        TokenType::Identifier
+                    } else {
+                        panic!("Unknown token: {}", value)
+                    }
+                }
+            };
+            token = Token::new(value, token_type);
+        } else if chars[i] == '"' {
+            let string = get_string_token(chars.clone(), i);
+            i += string.len();
+
+            token = Token::new(string, TokenType::String);
+        } else if i < chars.len() - 2 && chars[i] == '/' && chars[i + 1] == '/' {
+            let line = get_full_line(chars.clone(), i);
+            i += line.len();
+
+            token = Token::new(line, TokenType::Comment);
+        } else if chars[i] == ' ' {
+            i += 1;
+            continue;
+        } else if chars[i] == '\n' {
+            token = Token::new(String::from("\n"), TokenType::NewLine);
+        } else if chars[i] == '*' {
+            token = Token::new(String::from("*"), TokenType::Operator(OperatorType::Mult));
+        } else if chars[i] == '/' {
+            token = Token::new(String::from("/"), TokenType::Operator(OperatorType::Div));
+        } else if chars[i] == '+' {
+            token = Token::new(String::from("+"), TokenType::Operator(OperatorType::Add));
+        } else if chars[i] == '-' {
+            token = Token::new(String::from("-"), TokenType::Operator(OperatorType::Sub));
+        } else if chars[i] == '(' {
+            token = Token::new(String::from("("), TokenType::LParen);
+        } else if chars[i] == ')' {
+            token = Token::new(String::from(")"), TokenType::RParen);
+        } else if chars[i] == '{' {
+            token = Token::new(String::from("("), TokenType::LBrace);
+        } else if chars[i] == '}' {
+            token = Token::new(String::from(")"), TokenType::RBrace);
+        } else if chars[i] == '[' {
+            token = Token::new(String::from("("), TokenType::LBracket);
+        } else if chars[i] == ']' {
+            token = Token::new(String::from(")"), TokenType::RBracket);
+        } else if chars[i] == ';' {
+            token = Token::new(String::from(";"), TokenType::Semicolon);
+        } else if chars[i] == '=' {
+            if i < chars.len() - 1 && chars[i + 1] == '=' {
+                token = Token::new(String::from("=="), TokenType::EqCompare);
+            } else {
+                token = Token::new(String::from("="), TokenType::EqSet);
+            }
+        } else if chars[i] == '!' {
+            if i < chars.len() - 1 && chars[i + 1] == '=' {
+                token = Token::new(String::from("!="), TokenType::EqNCompare);
+            } else {
+                token = Token::new(String::from("!"), TokenType::Bang);
+            }
+        } else {
+            panic!("Unexpected token: {}", chars[i]);
+        }
+
         match token.token_type {
             TokenType::Comment => {}
             _ => {
                 tokens.push(token);
             }
         }
-    });
+
+        i += 1;
+    }
     tokens
 }
 
-fn generate_token(value: &str) -> Token {
-    let token_type = match value {
-        // types
-        "int" => TokenType::Type(VarType::Int),
-        "float" => TokenType::Type(VarType::Float),
-        "double" => TokenType::Type(VarType::Double),
-        "long" => TokenType::Type(VarType::Long),
-        "bool" => TokenType::Type(VarType::Bool),
-        "string" => TokenType::Type(VarType::String),
-        // keywords (add more)
-        "if" => TokenType::Keyword,
-        "else" => TokenType::Keyword,
-        "for" => TokenType::Keyword,
-        "while" => TokenType::Keyword,
-        // operators
-        "*" => TokenType::Operator(OperatorType::Mult),
-        "/" => TokenType::Operator(OperatorType::Div),
-        "+" => TokenType::Operator(OperatorType::Add),
-        "-" => TokenType::Operator(OperatorType::Sub),
-        // booleans
-        "true" => TokenType::Bool,
-        "false" => TokenType::Bool,
-        // comparison
-        "==" => TokenType::EqCompare,
-        "!=" => TokenType::EqNCompare,
-        "=" => TokenType::EqSet,
-        // semicolon yay
-        ";" => TokenType::Semicolon,
-        // brackets
-        ")" => TokenType::RParen,
-        "(" => TokenType::LParen,
-        "}" => TokenType::RBrace,
-        "{" => TokenType::LBrace,
-        "]" => TokenType::RBracket,
-        "[" => TokenType::LBracket,
-        // newline
-        "\n" => TokenType::NewLine,
-        _ => {
-            let chars: Vec<char> = value.chars().collect();
-            // check string, check number
-            if chars[0] == '"' {
-                TokenType::String
-            } else if is_number(value) {
-                TokenType::Number
-            } else if chars[0].is_alphabetic() {
-                TokenType::Identifier
-            } else if chars[0] == '/' && chars[1] == '/' {
-                TokenType::Comment
-            } else {
-                panic!("Unknown token: {}", value)
-            }
-        }
-    };
-
-    Token::new(value, token_type)
-}
-
-fn is_number(string: &str) -> bool {
+fn is_number(string: String) -> bool {
     let mut found_decimal = false;
     string.chars().all(|c| {
         if c == '.' {

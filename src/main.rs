@@ -52,17 +52,48 @@ fn main() {
 
     if args.iter().position(|a| a == "-b").is_some() {
         println!();
-        println!("[{}] read in {}ns", filename, file_end.as_nanos());
-        println!("Tokenized in {}ns", tokens_end.as_nanos());
-        println!("Ast generated in {}ns", tree_end.as_nanos());
-        println!("Evaluated in {}ns", eval_end.as_nanos());
-        println!("Total: {}ns", end.as_nanos());
+        println!(
+            "[{}] read in {}s | {}ms | {}µs | {}ns",
+            filename,
+            file_end.as_secs(),
+            file_end.as_millis(),
+            file_end.as_micros(),
+            file_end.as_nanos()
+        );
+        println!(
+            "Tokenized in {}s | {}ms | {}µs | {}ns",
+            tokens_end.as_secs(),
+            tokens_end.as_millis(),
+            tokens_end.as_micros(),
+            tokens_end.as_nanos()
+        );
+        println!(
+            "Ast generated in {}s | {}ms | {}µs | {}ns",
+            tree_end.as_secs(),
+            tree_end.as_millis(),
+            tree_end.as_micros(),
+            tree_end.as_nanos()
+        );
+        println!(
+            "Evaluated in {}s | {}ms | {}µs | {}ns",
+            eval_end.as_secs(),
+            eval_end.as_millis(),
+            eval_end.as_micros(),
+            eval_end.as_nanos()
+        );
+        println!(
+            "Total: {}s | {}ms | {}µs | {}ns",
+            end.as_secs(),
+            end.as_millis(),
+            end.as_micros(),
+            end.as_nanos()
+        );
     }
 
     // print_vars(&vars);
 }
 
-fn print_vars<'a>(vars: &'a Vec<VarValue<'a>>) {
+fn print_vars<'a>(vars: &'a Vec<VarValue>) {
     for var in vars.iter() {
         println!("{}", var.get_str());
     }

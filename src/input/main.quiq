@@ -1,1 +1,2 @@
-print(10);
+int v = true;
+print(10 + 1 * 4);
