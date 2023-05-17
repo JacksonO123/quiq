@@ -7,6 +7,7 @@ mod tokenizer;
 use std::cell::RefCell;
 use std::path::Path;
 use std::rc::Rc;
+use std::time::Instant;
 use std::{env::args, fs};
 
 use crate::ast::generate_tree;
@@ -15,28 +16,50 @@ use crate::interpreter::{eval, VarValue};
 use crate::tokenizer::tokenize;
 
 fn main() {
+    let start = Instant::now();
+
     let args: Vec<String> = args().collect();
     let filename = if args.len() == 1 {
         // repl here
         panic!("Repl not implemented yet");
     } else {
-        "main.quiq"
+        args[1].as_str()
     };
 
+    let file_start = Instant::now();
     let file = get_file(filename);
+    let file_end = file_start.elapsed();
 
+    let tokens_start = Instant::now();
     let tokens = tokenize(file.as_str());
+    let tokens_end = tokens_start.elapsed();
 
+    let tree_start = Instant::now();
     let tree = generate_tree(tokens);
-    tree.print();
+    let tree_end = tree_start.elapsed();
+    // tree.print();
 
     let mut vars: Vec<VarValue> = Vec::new();
     let functions = Rc::new(RefCell::new(Vec::new()));
 
     init_builtins(&mut vars, Rc::clone(&functions));
-    eval(&mut vars, functions, tree);
 
-    print_vars(&vars);
+    let eval_start = Instant::now();
+    eval(&mut vars, functions, tree);
+    let eval_end = eval_start.elapsed();
+
+    let end = start.elapsed();
+
+    if args.iter().position(|a| a == "-b").is_some() {
+        println!();
+        println!("[{}] read in {}ns", filename, file_end.as_nanos());
+        println!("Tokenized in {}ns", tokens_end.as_nanos());
+        println!("Ast generated in {}ns", tree_end.as_nanos());
+        println!("Evaluated in {}ns", eval_end.as_nanos());
+        println!("Total: {}ns", end.as_nanos());
+    }
+
+    // print_vars(&vars);
 }
 
 fn print_vars<'a>(vars: &'a Vec<VarValue<'a>>) {

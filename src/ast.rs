@@ -1,11 +1,14 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    helpers::{create_func_call_node, create_make_var_node, create_set_var_node},
+    helpers::{
+        create_func_call_node, create_make_var_node, create_set_var_node, get_exp_node, is_exp,
+        tokens_to_delimiter,
+    },
     tokenizer::{Token, TokenType},
 };
 
-#[derive(Clone)]
+#[derive(Clone, Copy, Debug)]
 pub enum Value<'a> {
     String(&'a str),
     Int(i32),
@@ -13,43 +16,42 @@ pub enum Value<'a> {
     Double(f64),
     Long(i64),
     Bool(bool),
-    MathExp(Vec<Token<'a>>),
-    ConcatExp(Vec<Token<'a>>),
-    AstNode(Rc<RefCell<AstNode<'a>>>),
 }
 impl<'a> Value<'a> {
-    pub fn get_str(&self) -> &str {
+    pub fn get_str(&self) -> String {
         match self {
+            Value::String(v) => v.to_string(),
+            Value::Float(v) => v.to_string(),
+            Value::Double(v) => v.to_string(),
+            Value::Long(v) => v.to_string(),
+            Value::Int(v) => v.to_string(),
             Value::Bool(v) => {
-                if *v {
-                    "true"
-                } else {
-                    "false"
-                }
+                let res = if *v { "true" } else { "false" };
+                res.to_string()
             }
-            _ => "Other val",
         }
     }
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub enum AstNodeType<'a> {
     StatementSeq(Vec<Rc<RefCell<AstNode<'a>>>>),
     MakeVar(Token<'a>, Token<'a>, Box<AstNode<'a>>),
     SetVar(Token<'a>, Box<AstNode<'a>>),
     Token(Token<'a>),
     CallFunc(&'a str, Vec<AstNode<'a>>),
+    Exp(Vec<Box<AstNode<'a>>>),
 }
 
-#[derive(Clone)]
+#[derive(Clone, Debug)]
 pub struct AstNode<'a> {
     pub node_type: AstNodeType<'a>,
 }
 impl<'a> AstNode<'a> {
-    fn new(node_type: AstNodeType<'a>) -> Self {
+    pub fn new(node_type: AstNodeType<'a>) -> Self {
         Self { node_type }
     }
-    fn new_ptr(node_type: AstNodeType<'a>) -> Rc<RefCell<Self>> {
+    pub fn new_ptr(node_type: AstNodeType<'a>) -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(AstNode::new(node_type)))
     }
     pub fn get_str(&self) -> String {
@@ -83,6 +85,16 @@ impl<'a> AstNode<'a> {
                     }
                 }
                 name.to_string()
+            }
+            AstNodeType::Exp(tokens) => {
+                let mut res = String::new();
+                for (i, token) in tokens.iter().enumerate() {
+                    res.push_str(token.get_str().as_str());
+                    if i < tokens.len() - 1 {
+                        res.push(' ');
+                    }
+                }
+                res
             }
         }
     }
@@ -122,12 +134,17 @@ pub fn get_ast_node(tokens: Vec<Token>) -> Option<AstNode> {
     } else if tokens.len() == 1 {
         Some(AstNode::new(AstNodeType::Token(tokens[0])))
     } else {
+        if is_exp(tokens.clone()) {
+            let exp_nodes = get_exp_node(tokens.clone());
+            return Some(AstNode::new(AstNodeType::Exp(exp_nodes)));
+        }
+
         let node_type = match tokens[0].token_type {
             TokenType::Type(_) => Some(create_make_var_node(tokens)),
             TokenType::Identifier => match tokens[1].token_type {
                 TokenType::LParen => Some(create_func_call_node(tokens)),
                 TokenType::EqSet => Some(create_set_var_node(tokens)),
-                _ => panic!("Unexpected token: {}", tokens[1].value),
+                _ => unimplemented!(),
             },
             TokenType::NewLine => None,
             _ => {
@@ -140,20 +157,6 @@ pub fn get_ast_node(tokens: Vec<Token>) -> Option<AstNode> {
             None
         }
     }
-}
-
-pub fn tokens_until_semicolon(tokens: Vec<Token>, start: usize) -> Vec<Token> {
-    let mut res = vec![];
-
-    for i in start..tokens.len() {
-        if tokens[i].value != ";" {
-            res.push(tokens[i]);
-        } else {
-            break;
-        }
-    }
-
-    res
 }
 
 pub fn generate_tree(tokens: Vec<Token>) -> Ast {
@@ -169,7 +172,7 @@ pub fn generate_tree(tokens: Vec<Token>) -> Ast {
             _ => {}
         }
 
-        let token_slice = tokens_until_semicolon(tokens.clone(), i);
+        let token_slice = tokens_to_delimiter(tokens.clone(), i, ";");
         let token_num = token_slice.len();
 
         let node_option = get_ast_node(token_slice);

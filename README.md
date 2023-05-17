@@ -1,7 +1,5 @@
 # Quiq
 
-## Todo
+Another programming language
 
-- [ ] Assign variables
-- [ ] Scopes
-  - [ ] When scopes close, free memory in that scope
+This time written in rust

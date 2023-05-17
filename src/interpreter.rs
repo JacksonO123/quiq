@@ -2,8 +2,8 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     ast::{Ast, AstNode, AstNodeType, Value},
-    helpers::set_var_value,
-    tokenizer::{Token, TokenType, VarType},
+    helpers::{eval_exp, set_var_value},
+    tokenizer::{Token, TokenType},
 };
 
 pub struct CustomFunc<'a> {
@@ -32,6 +32,16 @@ pub enum Func<'a> {
     Builtin(BuiltinFunc<'a>),
 }
 
+#[derive(Copy, Clone, Debug)]
+pub enum VarType {
+    Int,
+    Float,
+    Double,
+    Long,
+    String,
+    Bool,
+}
+
 pub struct VarValue<'a> {
     pub value: Value<'a>,
     pub scope: usize,
@@ -42,7 +52,7 @@ impl<'a> VarValue<'a> {
         Self { name, value, scope }
     }
     pub fn get_str(&self) -> String {
-        format!("Var: {} -> ", self.name).to_owned() + self.value.get_str()
+        format!("Var: {} -> ", self.name).to_owned() + self.value.get_str().as_str()
     }
 }
 
@@ -55,7 +65,7 @@ fn get_var_value<'a>(vars: &mut Vec<VarValue<'a>>, name: &'a str) -> Value<'a> {
     panic!("Undefined variable: {}", name);
 }
 
-fn value_from_token<'a>(
+pub fn value_from_token<'a>(
     vars: &mut Vec<VarValue<'a>>,
     t: Token<'a>,
     value_type: Option<Token<'a>>,
@@ -86,11 +96,19 @@ fn value_from_token<'a>(
                     _ => panic!("Unexpected type token"),
                 }
             } else {
-                let num = t.value.parse::<f64>().unwrap();
-                Value::Double(num)
+                if t.value.contains('.') {
+                    let num = t.value.parse::<f64>().unwrap();
+                    Value::Double(num)
+                } else {
+                    let num = t.value.parse::<i32>().unwrap();
+                    Value::Int(num)
+                }
             }
         }
-        TokenType::String => Value::String(t.value),
+        TokenType::String => {
+            let val = &t.value[1..t.value.len() - 1];
+            Value::String(val)
+        }
         TokenType::Bool => {
             let val = t.value.parse::<bool>().unwrap();
             Value::Bool(val)
@@ -119,8 +137,11 @@ fn call_func<'a>(
                     let f = builtin.func;
                     let args = args.iter().map(|a| {
                         let res = eval_node(vars, Rc::clone(&functions), scope, a.clone());
-                        if let Some(tok) = res {
-                            value_from_token(vars, tok, None)
+                        if let Some(val) = res {
+                            match val {
+                                EvalValue::Token(tok) => value_from_token(vars, tok, None),
+                                EvalValue::Value(v) => v,
+                            }
                         } else {
                             panic!("Cannot pass void type as parameter to function")
                         }
@@ -134,15 +155,20 @@ fn call_func<'a>(
     None
 }
 
+pub enum EvalValue<'a> {
+    Value(Value<'a>),
+    Token(Token<'a>),
+}
+
 /// evaluate ast node
 /// return type is single value
 /// Ex: AstNode::Token(bool) -> Token(bool)
-fn eval_node<'a>(
+pub fn eval_node<'a>(
     vars: &mut Vec<VarValue<'a>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
     node: AstNode<'a>,
-) -> Option<Token<'a>> {
+) -> Option<EvalValue<'a>> {
     match node.node_type.clone() {
         AstNodeType::StatementSeq(seq) => {
             for node in seq.iter() {
@@ -153,7 +179,10 @@ fn eval_node<'a>(
         AstNodeType::MakeVar(var_type, name, value) => {
             let value = eval_node(vars, functions, scope, *value);
             if let Some(tok) = value {
-                let val = value_from_token(vars, tok, Some(var_type));
+                let val = match tok {
+                    EvalValue::Token(t) => value_from_token(vars, t, Some(var_type)),
+                    EvalValue::Value(v) => v,
+                };
                 let var = VarValue::new(name.value, val, scope);
                 vars.push(var);
             } else {
@@ -164,13 +193,24 @@ fn eval_node<'a>(
         AstNodeType::SetVar(name, value) => {
             let value = eval_node(vars, functions, scope, *value);
             if let Some(tok) = value {
-                let val = value_from_token(vars, tok, None);
+                let val = match tok {
+                    EvalValue::Token(t) => value_from_token(vars, t, None),
+                    EvalValue::Value(v) => v,
+                };
                 set_var_value(vars, name.value, val);
             }
             None
         }
-        AstNodeType::Token(token) => Some(token),
-        AstNodeType::CallFunc(name, args) => call_func(vars, functions, scope, name, args),
+        AstNodeType::Token(token) => Some(EvalValue::Token(token)),
+        AstNodeType::CallFunc(name, args) => {
+            let func_res = call_func(vars, functions, scope, name, args);
+            if let Some(tok) = func_res {
+                Some(EvalValue::Token(tok))
+            } else {
+                None
+            }
+        }
+        AstNodeType::Exp(nodes) => Some(eval_exp(vars, Rc::clone(&functions), scope, nodes)),
     }
 }
 

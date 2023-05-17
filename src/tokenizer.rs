@@ -1,13 +1,13 @@
 use regex::Regex;
 
-#[derive(Copy, Clone, Debug)]
-pub enum VarType {
-    Int,
-    Float,
-    Double,
-    Long,
-    String,
-    Bool,
+use crate::interpreter::VarType;
+
+#[derive(Clone, Copy, Debug)]
+pub enum OperatorType {
+    Add,
+    Sub,
+    Mult,
+    Div,
 }
 
 #[derive(Debug, Copy, Clone)]
@@ -17,7 +17,7 @@ pub enum TokenType {
     String,
     Bool,
     Keyword,
-    Operator,
+    Operator(OperatorType),
     RParen,
     LParen,
     RBrace,
@@ -48,7 +48,8 @@ impl<'a> Token<'a> {
 }
 
 pub fn tokenize(code: &str) -> Vec<Token> {
-    let reg_str = "\\/\\/.*|\"[\\w\\s]*\"|\\w+|\\(|\\)|\\d+|,|;|==|=|!=|\\{|\\}|\\n";
+    let reg_str =
+        "\\d+(\\.\\d+)?|\\/\\/.*|\"[\\w\\s]*\"|\\w+|\\(|\\)|,|;|==|=|!=|\\{|\\}|\\n|\\+|-|\\*|/";
     let re = Regex::new(reg_str).unwrap();
     let matches: Vec<&str> = re.find_iter(code).map(|m| m.as_str()).collect();
 
@@ -80,10 +81,10 @@ fn generate_token(value: &str) -> Token {
         "for" => TokenType::Keyword,
         "while" => TokenType::Keyword,
         // operators
-        "*" => TokenType::Operator,
-        "/" => TokenType::Operator,
-        "+" => TokenType::Operator,
-        "-" => TokenType::Operator,
+        "*" => TokenType::Operator(OperatorType::Mult),
+        "/" => TokenType::Operator(OperatorType::Div),
+        "+" => TokenType::Operator(OperatorType::Add),
+        "-" => TokenType::Operator(OperatorType::Sub),
         // booleans
         "true" => TokenType::Bool,
         "false" => TokenType::Bool,
@@ -123,5 +124,16 @@ fn generate_token(value: &str) -> Token {
 }
 
 fn is_number(string: &str) -> bool {
-    string.chars().all(|c| c.is_digit(10))
+    let mut found_decimal = false;
+    string.chars().all(|c| {
+        if c == '.' {
+            if found_decimal {
+                return false;
+            }
+            found_decimal = true;
+            true
+        } else {
+            c.is_digit(10)
+        }
+    })
 }
