@@ -1,2 +1,5 @@
-int v = true;
-print(10 + 1 * 4);
+bool v = false;
+v = true;
+if (v) {
+  print(1234);
+}

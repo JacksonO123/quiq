@@ -326,6 +326,41 @@ pub fn eval_node<'a>(
     node: AstNode<'a>,
 ) -> Option<EvalValue> {
     match node.node_type.clone() {
+        AstNodeType::If(condition, node) => {
+            let condition_res = eval_node(
+                vars,
+                Rc::clone(&functions),
+                scope,
+                condition.as_ref().clone(),
+            );
+            if let Some(res) = condition_res {
+                let condition_val = match res {
+                    EvalValue::Value(val) => match val {
+                        Value::Bool(b) => b,
+                        _ => panic!("Error in `if`, expected boolean"),
+                    },
+                    EvalValue::Token(tok) => {
+                        let tok_val = value_from_token(vars, tok, None);
+                        match tok_val {
+                            Value::Bool(b) => b,
+                            _ => panic!("Error in `if`, expected boolean"),
+                        }
+                    }
+                };
+
+                if condition_val {
+                    eval_node(
+                        vars,
+                        Rc::clone(&functions),
+                        scope + 1,
+                        node.as_ref().clone(),
+                    );
+                }
+            } else {
+                panic!("Expected if condition to be type boolean");
+            }
+            None
+        }
         AstNodeType::StatementSeq(seq) => {
             for node in seq.iter() {
                 eval_node(vars, Rc::clone(&functions), scope, node.borrow().clone());

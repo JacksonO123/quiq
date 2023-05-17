@@ -38,7 +38,7 @@ pub struct Token {
     pub value: String,
 }
 impl Token {
-    fn new(value: String, token_type: TokenType) -> Self {
+    pub fn new(value: String, token_type: TokenType) -> Self {
         Self { token_type, value }
     }
     pub fn get_str(&self) -> String {
@@ -166,13 +166,13 @@ pub fn tokenize(code: &str) -> Vec<Token> {
         } else if chars[i] == ')' {
             token = Token::new(String::from(")"), TokenType::RParen);
         } else if chars[i] == '{' {
-            token = Token::new(String::from("("), TokenType::LBrace);
+            token = Token::new(String::from("{"), TokenType::LBrace);
         } else if chars[i] == '}' {
-            token = Token::new(String::from(")"), TokenType::RBrace);
+            token = Token::new(String::from("}"), TokenType::RBrace);
         } else if chars[i] == '[' {
-            token = Token::new(String::from("("), TokenType::LBracket);
+            token = Token::new(String::from("["), TokenType::LBracket);
         } else if chars[i] == ']' {
-            token = Token::new(String::from(")"), TokenType::RBracket);
+            token = Token::new(String::from("]"), TokenType::RBracket);
         } else if chars[i] == ';' {
             token = Token::new(String::from(";"), TokenType::Semicolon);
         } else if chars[i] == '=' {

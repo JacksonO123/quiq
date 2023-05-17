@@ -2,10 +2,9 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     helpers::{
-        create_bang_bool, create_func_call_node, create_make_var_node, create_set_var_node,
-        get_exp_node, is_exp, tokens_to_delimiter,
+        create_bang_bool, create_func_call_node, create_keyword_node, create_make_var_node,
+        create_set_var_node, get_exp_node, is_exp, tokens_to_delimiter,
     },
-    interpreter::value_from_token,
     tokenizer::{Token, TokenType},
 };
 
@@ -43,6 +42,7 @@ pub enum AstNodeType<'a> {
     CallFunc(String, Vec<AstNode<'a>>),
     Bang(Box<AstNode<'a>>),
     Exp(Vec<Box<AstNode<'a>>>),
+    If(Box<AstNode<'a>>, Box<AstNode<'a>>),
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +58,9 @@ impl<'a> AstNode<'a> {
     }
     pub fn get_str(&self) -> String {
         match &self.node_type {
+            AstNodeType::If(condition, node) => {
+                format!("If: {} ::then:: {}", condition.get_str(), node.get_str())
+            }
             AstNodeType::StatementSeq(seq) => {
                 let mut res = String::from("Statement: ");
                 for item in seq.iter() {
@@ -98,7 +101,7 @@ impl<'a> AstNode<'a> {
                 }
                 res
             }
-            AstNodeType::Bang(node) => "! -> {:?}".to_owned() + node.get_str().as_str(),
+            AstNodeType::Bang(node) => format!("! -> {:?}", node.get_str().as_str()),
         }
     }
 }
@@ -132,11 +135,21 @@ impl<'a> Ast<'a> {
 }
 
 pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
+    let mut tokens = tokens.clone();
     if tokens.len() == 0 {
         None
     } else if tokens.len() == 1 {
         Some(AstNode::new(AstNodeType::Token(tokens[0].clone())))
     } else {
+        while tokens.len() > 0
+            && match tokens[0].token_type {
+                TokenType::NewLine => true,
+                _ => false,
+            }
+        {
+            tokens.remove(0);
+        }
+
         if is_exp(tokens.clone()) {
             let exp_nodes = get_exp_node(tokens.clone());
             return Some(AstNode::new(AstNodeType::Exp(exp_nodes)));
@@ -151,6 +164,8 @@ pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
             },
             TokenType::NewLine => None,
             TokenType::Bang => Some(create_bang_bool(tokens)),
+            TokenType::String => Some(AstNodeType::Token(tokens[0].clone())),
+            TokenType::Keyword => Some(create_keyword_node(tokens)),
             _ => {
                 panic!("Token not implemented: {:?}", tokens)
             }

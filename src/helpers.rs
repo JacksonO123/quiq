@@ -31,6 +31,34 @@ pub fn create_set_var_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
     AstNodeType::SetVar(tokens[0].clone(), Box::new(node.unwrap()))
 }
 
+pub fn create_keyword_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
+    match tokens[0].value.clone().as_str() {
+        "if" => {
+            let condition = tokens_to_delimiter(tokens.clone(), 2, ")");
+            let condition_len = condition.len();
+            let condition_node = get_ast_node(condition);
+
+            // + 4 because tokens: [if, (, ), {]
+            let tokens_to_run = tokens_to_delimiter(tokens, condition_len + 4, "}");
+            let to_run_node = get_ast_node(tokens_to_run);
+
+            if let Some(c_node) = condition_node {
+                if let Some(tr_node) = to_run_node {
+                    AstNodeType::If(Box::new(c_node), Box::new(tr_node))
+                } else {
+                    panic!("Expected block for `if`");
+                }
+            } else {
+                panic!("Expected condition for `if`");
+            }
+        }
+        "else" => unimplemented!(),
+        "for" => unimplemented!(),
+        "while" => unimplemented!(),
+        _ => panic!("Unexpected keyword: {}", tokens[0].value),
+    }
+}
+
 fn get_params<'a>(tokens: Vec<Token>) -> Vec<AstNode<'a>> {
     // TODO: allow for multiple params, reliable
     let mut tokens_between_parens: Vec<Token> = Vec::new();
@@ -193,31 +221,56 @@ pub fn get_exp_node<'a>(tokens: Vec<Token>) -> Vec<Box<AstNode<'a>>> {
 
 pub fn is_exp(tokens: Vec<Token>) -> bool {
     let mut open_brackets = 0;
+    let mut res = true;
+    let mut op_found = false;
 
     for token in tokens.iter() {
-        if OPEN_BRACKETS
-            .iter()
-            .position(|&s| token.value == s)
-            .is_some()
-        {
-            open_brackets += 1;
-        } else if CLOSE_BRACKETS
-            .iter()
-            .position(|&s| token.value == s)
-            .is_some()
-        {
-            open_brackets -= 1;
-        }
-        if open_brackets == 0
-            && match token.token_type {
-                TokenType::Operator(_) => true,
-                _ => false,
+        match token.token_type {
+            TokenType::Operator(_) => {
+                if open_brackets == 0 {
+                    op_found = true;
+                }
             }
-        {
-            return true;
+            TokenType::RBrace => {
+                open_brackets -= 1;
+            }
+            TokenType::RBracket => {
+                open_brackets -= 1;
+            }
+            TokenType::RParen => {
+                open_brackets -= 1;
+            }
+            TokenType::LBrace => {
+                open_brackets += 1;
+            }
+            TokenType::LBracket => {
+                open_brackets += 1;
+            }
+            TokenType::LParen => {
+                open_brackets += 1;
+            }
+            TokenType::Type(_) => {
+                res = false;
+            }
+            TokenType::EqCompare => {
+                res = false;
+            }
+            TokenType::EqNCompare => {
+                res = false;
+            }
+            TokenType::EqSet => {
+                res = false;
+            }
+            TokenType::Bang => {
+                res = false;
+            }
+            _ => {}
+        }
+        if !res {
+            break;
         }
     }
-    false
+    res && open_brackets == 0 && op_found
 }
 
 #[derive(Clone, Debug)]
