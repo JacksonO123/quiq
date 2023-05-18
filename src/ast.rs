@@ -2,9 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     helpers::{
-        create_bang_bool, create_func_call_node, create_keyword_node, create_make_var_node,
-        create_set_var_node, get_exp_node, is_exp, tokens_to_delimiter,
+        create_arr, create_bang_bool, create_func_call_node, create_keyword_node,
+        create_make_var_node, create_set_var_node, get_exp_node, is_exp, tokens_to_delimiter,
     },
+    interpreter::VarType,
     tokenizer::{Token, TokenType},
 };
 
@@ -16,6 +17,7 @@ pub enum Value {
     Double(f64),
     Long(i64),
     Bool(bool),
+    Array(Vec<Value>),
 }
 impl Value {
     pub fn get_str(&self) -> String {
@@ -29,6 +31,21 @@ impl Value {
                 let res = if *v { "true" } else { "false" };
                 res.to_string()
             }
+            Value::Array(arr) => {
+                let mut res = String::from("[");
+
+                for (i, item) in arr.iter().enumerate() {
+                    if i < arr.len() - 1 {
+                        res.push_str(format!("{}, ", item.get_str()).as_str());
+                    } else {
+                        res.push_str(item.get_str().as_str());
+                    }
+                }
+
+                res.push(']');
+
+                res
+            }
         }
     }
 }
@@ -36,13 +53,16 @@ impl Value {
 #[derive(Clone, Debug)]
 pub enum AstNodeType<'a> {
     StatementSeq(Vec<Rc<RefCell<AstNode<'a>>>>),
-    MakeVar(Token, Token, Box<AstNode<'a>>),
+    /// type, name, value node
+    MakeVar(VarType, Token, Box<AstNode<'a>>),
     SetVar(Token, Box<AstNode<'a>>),
     Token(Token),
     CallFunc(String, Vec<AstNode<'a>>),
     Bang(Box<AstNode<'a>>),
     Exp(Vec<Box<AstNode<'a>>>),
     If(Box<AstNode<'a>>, Box<AstNode<'a>>),
+    CreateArr(Value), // possibly change
+    Array(Vec<AstNode<'a>>),
 }
 
 #[derive(Clone, Debug)]
@@ -58,6 +78,8 @@ impl<'a> AstNode<'a> {
     }
     pub fn get_str(&self) -> String {
         match &self.node_type {
+            AstNodeType::Array(arr) => format!("{:?}", arr),
+            AstNodeType::CreateArr(val) => format!("[{}]", val.get_str()),
             AstNodeType::If(condition, node) => {
                 format!("If: {} ::then:: {}", condition.get_str(), node.get_str())
             }
@@ -73,11 +95,11 @@ impl<'a> AstNode<'a> {
                     "Setting {} to {} as {}",
                     name.value,
                     value.get_str().as_str(),
-                    var_type.value
+                    var_type.get_str()
                 )
             }
             AstNodeType::SetVar(name, value) => {
-                format!("Setting {} to {}", name.value, value.get_str().as_str())
+                format!("Setting {} to {}", name.get_str(), value.get_str().as_str())
             }
             AstNodeType::Token(t) => t.value.to_string(),
             AstNodeType::CallFunc(name, args) => {
@@ -166,6 +188,7 @@ pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
             TokenType::Bang => Some(create_bang_bool(tokens)),
             TokenType::String => Some(AstNodeType::Token(tokens[0].clone())),
             TokenType::Keyword => Some(create_keyword_node(tokens)),
+            TokenType::LBracket => Some(create_arr(tokens)),
             _ => {
                 panic!("Token not implemented: {:?}", tokens)
             }

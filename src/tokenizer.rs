@@ -8,7 +8,7 @@ pub enum OperatorType {
     Div,
 }
 
-#[derive(Debug, Copy, Clone)]
+#[derive(Debug, Clone)]
 pub enum TokenType {
     Type(VarType),
     Number,
@@ -30,6 +30,7 @@ pub enum TokenType {
     NewLine,
     Comment,
     Bang,
+    Comma,
 }
 
 #[derive(Debug, Clone)]
@@ -173,6 +174,8 @@ pub fn tokenize(code: &str) -> Vec<Token> {
             token = Token::new(String::from("["), TokenType::LBracket);
         } else if chars[i] == ']' {
             token = Token::new(String::from("]"), TokenType::RBracket);
+        } else if chars[i] == ',' {
+            token = Token::new(String::from(","), TokenType::Comma);
         } else if chars[i] == ';' {
             token = Token::new(String::from(";"), TokenType::Semicolon);
         } else if chars[i] == '=' {

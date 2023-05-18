@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     ast::{get_ast_node, AstNode, AstNodeType, Value},
-    interpreter::{eval_node, value_from_token, EvalValue, Func, VarValue},
+    interpreter::{eval_node, value_from_token, EvalValue, Func, VarType, VarValue},
     tokenizer::{Token, TokenType},
 };
 
@@ -10,14 +10,33 @@ const OPEN_BRACKETS: [&str; 3] = ["(", "{", "["];
 const CLOSE_BRACKETS: [&str; 3] = [")", "}", "]"];
 
 pub fn create_make_var_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
-    let value_to_set = tokens_to_delimiter(tokens.clone(), 3, ";");
+    let mut var_type = VarType::from(tokens[0].value.as_str());
+    let mut i = 0;
+    while match tokens[i + 1].token_type {
+        TokenType::LBracket => true,
+        _ => false,
+    } {
+        var_type = VarType::Array(Box::new(var_type));
+
+        i += 2;
+    }
+
+    let eq_pos = tokens
+        .iter()
+        .position(|t| match t.token_type {
+            TokenType::EqSet => true,
+            _ => false,
+        })
+        .unwrap();
+
+    let value_to_set = tokens_to_delimiter(tokens.clone(), eq_pos + 1, ";");
     let node = get_ast_node(value_to_set);
     if node.is_none() {
         panic!("Invalid value, expected value to set variable");
     }
     AstNodeType::MakeVar(
-        tokens[0].clone(),
-        tokens[1].clone(),
+        var_type,
+        tokens[eq_pos - 1].clone(),
         Box::new(node.unwrap()),
     )
 }
@@ -319,5 +338,87 @@ pub fn create_bang_bool<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
         AstNodeType::Bang(Box::new(node))
     } else {
         panic!("Expected value to !");
+    }
+}
+
+fn create_arr_with_tokens<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
+    let mut node_tokens = tokens_to_delimiter(tokens.clone(), 0, ",");
+    let mut i = node_tokens.len() + 1;
+
+    let mut arr_values: Vec<AstNode> = Vec::new();
+
+    while node_tokens.len() > 0 {
+        let node_option = get_ast_node(node_tokens.clone());
+
+        if let Some(node) = node_option {
+            arr_values.push(node);
+        }
+
+        node_tokens = tokens_to_delimiter(tokens.clone(), i, ",");
+        i += node_tokens.len() + 1;
+    }
+
+    AstNodeType::Array(arr_values)
+}
+
+pub fn create_arr<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
+    let mut tokens = tokens.clone();
+    tokens.remove(0);
+    tokens.remove(tokens.len() - 1);
+    match tokens[0].token_type {
+        TokenType::LBracket => create_arr_with_tokens(tokens),
+        TokenType::Number => create_arr_with_tokens(tokens),
+        TokenType::String => create_arr_with_tokens(tokens),
+        TokenType::Bool => create_arr_with_tokens(tokens),
+        TokenType::Identifier => create_arr_with_tokens(tokens),
+        _ => panic!("Unexpected token: {}", tokens[0].value),
+    }
+}
+
+pub fn ensure_type(var_type: VarType, val: Value) -> Option<Value> {
+    let valid = match val.clone() {
+        Value::String(_) => match var_type {
+            VarType::String => true,
+            _ => false,
+        },
+        Value::Int(_) => match var_type {
+            VarType::Int => true,
+            _ => false,
+        },
+        Value::Float(_) => match var_type {
+            VarType::Float => true,
+            _ => false,
+        },
+        Value::Double(_) => match var_type {
+            VarType::Double => true,
+            _ => false,
+        },
+        Value::Long(_) => match var_type {
+            VarType::Long => true,
+            _ => false,
+        },
+        Value::Bool(_) => match var_type {
+            VarType::Bool => true,
+            _ => false,
+        },
+        Value::Array(arr) => match var_type {
+            VarType::Array(arr_type) => {
+                let mut res = true;
+                for item in arr.iter() {
+                    if !ensure_type(arr_type.as_ref().clone(), item.clone()).is_some() {
+                        res = false;
+                        break;
+                    }
+                }
+                res
+            }
+            _ => false,
+        },
+    };
+
+    if valid {
+        Some(val)
+    } else {
+        None
     }
 }

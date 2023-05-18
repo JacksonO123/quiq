@@ -2,7 +2,7 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     ast::{Ast, AstNode, AstNodeType, Value},
-    helpers::{flatten_exp, set_var_value, ExpValue},
+    helpers::{ensure_type, flatten_exp, set_var_value, ExpValue},
     tokenizer::{OperatorType, Token, TokenType},
 };
 
@@ -32,7 +32,7 @@ pub enum Func<'a> {
     Builtin(BuiltinFunc<'a>),
 }
 
-#[derive(Copy, Clone, Debug)]
+#[derive(Clone, Debug)]
 pub enum VarType {
     Int,
     Float,
@@ -40,6 +40,31 @@ pub enum VarType {
     Long,
     String,
     Bool,
+    Array(Box<VarType>),
+}
+impl VarType {
+    pub fn from(string: &str) -> Self {
+        match string {
+            "int" => VarType::Int,
+            "float" => VarType::Float,
+            "double" => VarType::Double,
+            "long" => VarType::Long,
+            "string" => VarType::String,
+            "bool" => VarType::Bool,
+            _ => panic!("Inable to infer var type from: {}", string),
+        }
+    }
+    pub fn get_str(&self) -> &str {
+        match self {
+            VarType::Int => "int",
+            VarType::Float => "float",
+            VarType::Double => "double",
+            VarType::Long => "long",
+            VarType::String => "string",
+            VarType::Bool => "bool",
+            VarType::Array(_) => "arr",
+        }
+    }
 }
 
 pub struct VarValue {
@@ -68,31 +93,28 @@ fn get_var_value<'a>(vars: &mut Vec<VarValue>, name: String) -> Value {
 pub fn value_from_token<'a>(
     vars: &mut Vec<VarValue>,
     t: Token,
-    value_type: Option<Token>,
+    value_type: Option<VarType>,
 ) -> Value {
     match t.token_type {
         TokenType::Number => {
             if let Some(vt) = value_type {
-                match vt.token_type {
-                    TokenType::Type(tok_type) => match tok_type {
-                        VarType::Int => {
-                            let num = t.value.parse::<i32>().unwrap();
-                            Value::Int(num)
-                        }
-                        VarType::Float => {
-                            let num = t.value.parse::<f32>().unwrap();
-                            Value::Float(num)
-                        }
-                        VarType::Double => {
-                            let num = t.value.parse::<f64>().unwrap();
-                            Value::Double(num)
-                        }
-                        VarType::Long => {
-                            let num = t.value.parse::<i64>().unwrap();
-                            Value::Long(num)
-                        }
-                        _ => panic!("Unexpected number type"),
-                    },
+                match vt {
+                    VarType::Int => {
+                        let num = t.value.parse::<i32>().unwrap();
+                        Value::Int(num)
+                    }
+                    VarType::Float => {
+                        let num = t.value.parse::<f32>().unwrap();
+                        Value::Float(num)
+                    }
+                    VarType::Double => {
+                        let num = t.value.parse::<f64>().unwrap();
+                        Value::Double(num)
+                    }
+                    VarType::Long => {
+                        let num = t.value.parse::<i64>().unwrap();
+                        Value::Long(num)
+                    }
                     _ => panic!("Unexpected type token"),
                 }
             } else {
@@ -178,7 +200,7 @@ pub fn eval_exp<'a>(
     for current_op in pemdas_operations.iter() {
         let mut i = 0;
         while i < flattened.len() {
-            match flattened[i] {
+            match flattened[i].clone() {
                 ExpValue::Operator(tok) => {
                     match tok {
                         TokenType::Operator(op_type) => {
@@ -326,6 +348,28 @@ pub fn eval_node<'a>(
     node: AstNode<'a>,
 ) -> Option<EvalValue> {
     match node.node_type.clone() {
+        AstNodeType::Array(arr_nodes) => {
+            let mut res_arr: Vec<Value> = Vec::new();
+
+            for node in arr_nodes.iter() {
+                let res_option = eval_node(vars, Rc::clone(&functions), scope, node.clone());
+                if let Some(res) = res_option {
+                    let val = match res {
+                        EvalValue::Value(v) => v,
+                        EvalValue::Token(t) => match t.token_type {
+                            TokenType::Number => value_from_token(vars, t, None),
+                            TokenType::String => value_from_token(vars, t, None),
+                            TokenType::Bool => value_from_token(vars, t, None),
+                            TokenType::Identifier => value_from_token(vars, t, None),
+                            _ => panic!("Unexpected token: {}", t.value),
+                        },
+                    };
+                    res_arr.push(val);
+                }
+            }
+            Some(EvalValue::Value(Value::Array(res_arr)))
+        }
+        AstNodeType::CreateArr(val) => Some(EvalValue::Value(val)),
         AstNodeType::If(condition, node) => {
             let condition_res = eval_node(
                 vars,
@@ -372,7 +416,7 @@ pub fn eval_node<'a>(
             if let Some(tok) = value {
                 let val = match tok {
                     EvalValue::Token(t) => value_from_token(vars, t, Some(var_type)),
-                    EvalValue::Value(v) => v,
+                    EvalValue::Value(v) => ensure_type(var_type, v).unwrap(),
                 };
                 let var = VarValue::new(name.value, val, scope);
                 vars.push(var);

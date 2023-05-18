@@ -1,5 +1,2 @@
-bool v = false;
-v = true;
-if (v) {
-  print(1234);
-}
+bool[][] v = [[false, true], [true, false]];
+print(v);
