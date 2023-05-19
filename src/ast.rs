@@ -156,24 +156,15 @@ impl<'a> Ast<'a> {
             _ => {}
         }
     }
-    pub fn print(&self) {
-        match &self.node.borrow().node_type {
-            AstNodeType::StatementSeq(seq) => {
-                for item in seq.iter() {
-                    println!("Ast->node:: {}", item.borrow().get_str());
-                }
-            }
-            _ => {}
-        }
-    }
 }
 
-pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
+pub fn get_ast_node<'a>(tokens: &Vec<Token>) -> Option<AstNode<'a>> {
     let mut tokens = tokens.clone();
     if tokens.len() == 0 {
         None
     } else if tokens.len() == 1 {
-        Some(AstNode::new(AstNodeType::Token(tokens[0].clone())))
+        let res = Some(AstNode::new(AstNodeType::Token(tokens[0].clone())));
+        res
     } else {
         while tokens.len() > 0
             && match tokens[0].token_type {
@@ -184,16 +175,20 @@ pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
             tokens.remove(0);
         }
 
-        if is_exp(tokens.clone()) {
+        if is_exp(&tokens) {
             let exp_nodes = get_exp_node(tokens.clone());
             return Some(AstNode::new(AstNodeType::Exp(exp_nodes)));
         }
 
         let node_type = match tokens[0].token_type {
-            TokenType::Type(_) => match tokens[1].token_type {
-                TokenType::LParen => Some(create_cast_node(tokens)),
-                _ => Some(create_make_var_node(tokens)),
-            },
+            TokenType::Type(_) => {
+                let res = match tokens[1].token_type {
+                    TokenType::LParen => Some(create_cast_node(tokens)),
+                    _ => Some(create_make_var_node(tokens)),
+                };
+
+                res
+            }
             TokenType::Identifier => match tokens[1].token_type {
                 TokenType::LParen => Some(create_func_call_node(tokens)),
                 TokenType::EqSet => Some(create_set_var_node(tokens)),
@@ -205,7 +200,7 @@ pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
                     let mut access_token_nodes: Vec<AstNode> = Vec::new();
                     let tokens_clone = get_struct_access_tokens(tokens_clone);
                     for token_clone in tokens_clone.iter() {
-                        let res = get_ast_node(token_clone.clone()).unwrap();
+                        let res = get_ast_node(&token_clone).unwrap();
                         access_token_nodes.push(res);
                     }
                     Some(AstNodeType::AccessStructProp(
@@ -219,16 +214,23 @@ pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
             TokenType::Bang => Some(create_bang_bool(tokens)),
             TokenType::String => Some(AstNodeType::Token(tokens[0].clone())),
             TokenType::Keyword => Some(create_keyword_node(tokens)),
-            TokenType::LBracket => Some(create_arr(tokens)),
+            TokenType::LBracket => {
+                let res = Some(create_arr(tokens));
+
+                res
+            }
             _ => {
                 panic!("Token not implemented: {:?}", tokens)
             }
         };
-        if let Some(nt) = node_type {
+
+        let res = if let Some(nt) = node_type {
             Some(AstNode::new(nt))
         } else {
             None
-        }
+        };
+
+        res
     }
 }
 
@@ -245,10 +247,10 @@ pub fn generate_tree<'a>(tokens: Vec<Token>) -> Ast<'a> {
             _ => {}
         }
 
-        let token_slice = tokens_to_delimiter(tokens.clone(), i, ";");
+        let token_slice = tokens_to_delimiter(&tokens, i, ";");
         let token_num = token_slice.len();
 
-        let node_option = get_ast_node(token_slice);
+        let node_option = get_ast_node(&token_slice);
         if let Some(node) = node_option {
             let ptr = Rc::new(RefCell::new(node));
             tree.add(ptr);

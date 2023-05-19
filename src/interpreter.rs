@@ -11,14 +11,14 @@ use crate::{
 
 pub struct CustomFunc<'a> {
     name: &'a str,
-    scope: usize,
-    tree: AstNode<'a>,
+    // scope: usize,
+    // tree: AstNode<'a>,
 }
-impl<'a> CustomFunc<'a> {
-    fn new(name: &'a str, scope: usize, tree: AstNode<'a>) -> Self {
-        Self { name, scope, tree }
-    }
-}
+// impl<'a> CustomFunc<'a> {
+//     fn new(name: &'a str, scope: usize, tree: AstNode<'a>) -> Self {
+//         Self { name, scope, tree }
+//     }
+// }
 
 pub struct BuiltinFunc<'a> {
     name: &'a str,
@@ -167,7 +167,7 @@ fn call_func<'a>(
                     found = true;
                     let f = builtin.func;
                     let args = args.iter().map(|a| {
-                        let res = eval_node(vars, Rc::clone(&functions), scope, a.clone());
+                        let res = eval_node(vars, Rc::clone(&functions), scope, a);
                         if let Some(val) = res {
                             match val {
                                 EvalValue::Token(tok) => value_from_token(vars, tok, None),
@@ -217,12 +217,12 @@ pub fn eval_exp<'a>(
     for current_op in pemdas_operations.iter() {
         let mut i = 0;
         while i < flattened.len() {
-            match flattened[i].clone() {
+            match &flattened[i] {
                 ExpValue::Operator(tok) => {
                     match tok {
                         TokenType::Operator(op_type) => {
-                            let left = flattened[i - 1].clone();
-                            let right = flattened[i + 1].clone();
+                            let left = &flattened[i - 1];
+                            let right = &flattened[i + 1];
 
                             let left = match left {
                                 ExpValue::Value(val) => val,
@@ -365,8 +365,8 @@ pub fn eval_exp<'a>(
         }
     }
 
-    match flattened[0].clone() {
-        ExpValue::Value(val) => EvalValue::Value(val),
+    match &flattened[0] {
+        ExpValue::Value(val) => EvalValue::Value(val.clone()),
         _ => panic!("Invalid token resulting from expression"),
     }
 }
@@ -378,11 +378,11 @@ pub fn eval_node<'a>(
     vars: &mut Vec<VarValue>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
-    node: AstNode<'a>,
+    node: &AstNode<'a>,
 ) -> Option<EvalValue> {
     match node.node_type.clone() {
         AstNodeType::Cast(var_type, node) => {
-            let res_option = eval_node(vars, Rc::clone(&functions), scope, node.as_ref().clone());
+            let res_option = eval_node(vars, Rc::clone(&functions), scope, node.as_ref());
 
             if let Some(eval_value) = res_option {
                 let val = get_eval_value(vars, eval_value);
@@ -395,7 +395,7 @@ pub fn eval_node<'a>(
         AstNodeType::AccessStructProp(struct_token, prop) => {
             let value = value_from_token(vars, struct_token.clone(), None);
 
-            match value {
+            let res = match value {
                 Value::Array(mut vals) => match &prop
                     .get(0)
                     .expect("Expected property to access on Array")
@@ -403,7 +403,7 @@ pub fn eval_node<'a>(
                 {
                     AstNodeType::CallFunc(name, args) => match name.as_str() {
                         "push" => {
-                            push_to_array(vars, functions, scope, &mut vals, args);
+                            push_to_array(vars, Rc::clone(&functions), scope, &mut vals, args);
                             update_variable(
                                 vars,
                                 scope,
@@ -411,7 +411,9 @@ pub fn eval_node<'a>(
                                 EvalValue::Value(Value::Array(vals)),
                             );
 
-                            Some(EvalValue::Token(struct_token))
+                            let res = Some(EvalValue::Token(struct_token));
+
+                            res
                         }
                         _ => panic!("Unknown array method: {}", name),
                     },
@@ -425,13 +427,16 @@ pub fn eval_node<'a>(
                     _ => panic!("Unexpected operation: {:?}", prop),
                 },
                 _ => unimplemented!(),
-            }
+            };
+
+            res
         }
         AstNodeType::Array(arr_nodes) => {
             let mut res_arr: Vec<Value> = Vec::new();
 
             for node in arr_nodes.iter() {
-                let res_option = eval_node(vars, Rc::clone(&functions), scope, node.clone());
+                let res_option = eval_node(vars, Rc::clone(&functions), scope, node);
+
                 if let Some(res) = res_option {
                     let val = get_eval_value(vars, res);
                     res_arr.push(val);
@@ -440,12 +445,7 @@ pub fn eval_node<'a>(
             Some(EvalValue::Value(Value::Array(res_arr)))
         }
         AstNodeType::If(condition, node) => {
-            let condition_res = eval_node(
-                vars,
-                Rc::clone(&functions),
-                scope,
-                condition.as_ref().clone(),
-            );
+            let condition_res = eval_node(vars, Rc::clone(&functions), scope, condition.as_ref());
             if let Some(res) = condition_res {
                 let condition_val = match res {
                     EvalValue::Value(val) => match val {
@@ -462,12 +462,7 @@ pub fn eval_node<'a>(
                 };
 
                 if condition_val {
-                    eval_node(
-                        vars,
-                        Rc::clone(&functions),
-                        scope + 1,
-                        node.as_ref().clone(),
-                    );
+                    eval_node(vars, Rc::clone(&functions), scope + 1, node.as_ref());
                 }
             } else {
                 panic!("Expected if condition to be type boolean");
@@ -476,26 +471,35 @@ pub fn eval_node<'a>(
         }
         AstNodeType::StatementSeq(seq) => {
             for node in seq.iter() {
-                eval_node(vars, Rc::clone(&functions), scope, node.borrow().clone());
+                eval_node(
+                    vars,
+                    Rc::clone(&functions),
+                    scope,
+                    &node.borrow().to_owned(),
+                );
             }
             None
         }
         AstNodeType::MakeVar(var_type, name, value) => {
-            let value = eval_node(vars, functions, scope, *value);
+            let value = eval_node(vars, functions, scope, value.as_ref());
             if let Some(tok) = value {
                 let val = match tok {
                     EvalValue::Token(t) => value_from_token(vars, t, Some(var_type)),
-                    EvalValue::Value(v) => ensure_type(var_type.clone(), v.clone()).expect(
-                        format!(
-                            "Unexpected variable type definition, expected {:?} found {:?}",
-                            match v {
-                                Value::Array(arr) => VarType::Array(Box::new(get_array_type(arr))),
-                                _ => panic!(),
-                            },
-                            var_type
-                        )
-                        .as_str(),
-                    ),
+                    EvalValue::Value(v) => {
+                        if ensure_type(&var_type, &v) {
+                            v
+                        } else {
+                            panic!(
+                                "Unexpected variable type definition, expected {:?} found {:?}",
+                                match v {
+                                    Value::Array(arr) =>
+                                        VarType::Array(Box::new(get_array_type(&arr))),
+                                    _ => panic!(),
+                                },
+                                var_type
+                            )
+                        }
+                    }
                 };
                 let var = VarValue::new(name.value, val, scope);
                 vars.push(var);
@@ -505,7 +509,7 @@ pub fn eval_node<'a>(
             None
         }
         AstNodeType::SetVar(name, value) => {
-            let value = eval_node(vars, functions, scope, *value);
+            let value = eval_node(vars, functions, scope, value.as_ref());
             if let Some(tok) = value {
                 let val = match tok {
                     EvalValue::Token(t) => value_from_token(vars, t, None),
@@ -526,7 +530,7 @@ pub fn eval_node<'a>(
         }
         AstNodeType::Exp(nodes) => Some(eval_exp(vars, Rc::clone(&functions), scope, nodes)),
         AstNodeType::Bang(node) => {
-            let val = eval_node(vars, functions, scope, node.as_ref().clone());
+            let val = eval_node(vars, functions, scope, node.as_ref());
             let b = if let Some(value) = val {
                 match value {
                     EvalValue::Value(v) => match v {
@@ -550,6 +554,6 @@ pub fn eval_node<'a>(
 }
 
 pub fn eval<'a>(vars: &mut Vec<VarValue>, functions: Rc<RefCell<Vec<Func<'a>>>>, tree: Ast<'a>) {
-    let root_node = tree.node.borrow().clone();
-    eval_node(vars, functions, 0, root_node);
+    let root_node = tree.node.borrow();
+    eval_node(vars, functions, 0, &root_node.to_owned());
 }

@@ -32,6 +32,7 @@ pub enum TokenType {
     Bang,
     Comma,
     Period,
+    Divider,
 }
 
 #[derive(Debug, Clone)]
@@ -48,7 +49,7 @@ impl Token {
     }
 }
 
-fn get_full_token(chars: Vec<char>, start: usize) -> String {
+fn get_full_token(chars: &Vec<char>, start: usize) -> String {
     let mut res = String::new();
 
     let mut dot_found = false;
@@ -73,7 +74,7 @@ fn get_full_token(chars: Vec<char>, start: usize) -> String {
     res
 }
 
-fn get_string_token(chars: Vec<char>, start: usize) -> String {
+fn get_string_token(chars: &Vec<char>, start: usize) -> String {
     let mut res = String::new();
     let mut i = start + 1;
     while i < chars.len() {
@@ -89,7 +90,7 @@ fn get_string_token(chars: Vec<char>, start: usize) -> String {
     res
 }
 
-fn get_full_line(chars: Vec<char>, start: usize) -> String {
+fn get_full_line(chars: &Vec<char>, start: usize) -> String {
     let mut res = String::new();
     let mut i = start;
     while i < chars.len() {
@@ -115,7 +116,7 @@ pub fn tokenize(code: &str) -> Vec<Token> {
             || chars[i].is_numeric()
             || (i < chars.len() - 1 && chars[i] == '-' && chars[i + 1].is_numeric())
         {
-            let value = get_full_token(chars.clone(), i);
+            let value = get_full_token(&chars, i);
             i += value.len() - 1;
 
             let token_type = match value.as_str() {
@@ -138,7 +139,7 @@ pub fn tokenize(code: &str) -> Vec<Token> {
                 _ => {
                     let chars: Vec<char> = value.chars().collect();
                     // check string, check number
-                    if is_number(value.clone()) {
+                    if is_number(&value) {
                         TokenType::Number
                     } else if chars[0].is_alphabetic() {
                         TokenType::Identifier
@@ -149,12 +150,12 @@ pub fn tokenize(code: &str) -> Vec<Token> {
             };
             token = Token::new(value, token_type);
         } else if chars[i] == '"' {
-            let string = get_string_token(chars.clone(), i);
+            let string = get_string_token(&chars, i);
             i += string.len();
 
             token = Token::new(string, TokenType::String);
         } else if i < chars.len() - 2 && chars[i] == '/' && chars[i + 1] == '/' {
-            let line = get_full_line(chars.clone(), i);
+            let line = get_full_line(&chars, i);
             i += line.len();
 
             token = Token::new(line, TokenType::Comment);
@@ -189,6 +190,8 @@ pub fn tokenize(code: &str) -> Vec<Token> {
             token = Token::new(String::from(","), TokenType::Period);
         } else if chars[i] == ';' {
             token = Token::new(String::from(";"), TokenType::Semicolon);
+        } else if chars[i] == '|' {
+            token = Token::new(String::from("|"), TokenType::Divider);
         } else if chars[i] == '=' {
             if i < chars.len() - 1 && chars[i + 1] == '=' {
                 token = Token::new(String::from("=="), TokenType::EqCompare);
@@ -217,7 +220,7 @@ pub fn tokenize(code: &str) -> Vec<Token> {
     tokens
 }
 
-fn is_number(string: String) -> bool {
+fn is_number(string: &String) -> bool {
     let mut found_decimal = false;
     // TODO: check for negative
     let mut first = true;
