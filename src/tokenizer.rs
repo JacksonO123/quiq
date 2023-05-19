@@ -31,6 +31,7 @@ pub enum TokenType {
     Comment,
     Bang,
     Comma,
+    Period,
 }
 
 #[derive(Debug, Clone)]
@@ -51,13 +52,17 @@ fn get_full_token(chars: Vec<char>, start: usize) -> String {
     let mut res = String::new();
 
     let mut dot_found = false;
-    let is_number = chars[0].is_numeric();
+    let is_number = chars[start].is_numeric() || chars[start] == '-';
     let mut i = start;
     while (chars[i].is_alphabetic() && !is_number)
+        || (i == start && chars[i] == '-')
         || chars[i].is_numeric()
         || (chars[i] == '.' && !dot_found)
     {
         if chars[i] == '.' {
+            if !is_number {
+                return res;
+            }
             dot_found = true;
         }
 
@@ -106,7 +111,10 @@ pub fn tokenize(code: &str) -> Vec<Token> {
     let chars: Vec<char> = code.chars().collect();
     while i < chars.len() {
         let token: Token;
-        if chars[i].is_alphabetic() || chars[i].is_numeric() {
+        if chars[i].is_alphabetic()
+            || chars[i].is_numeric()
+            || (i < chars.len() - 1 && chars[i] == '-' && chars[i + 1].is_numeric())
+        {
             let value = get_full_token(chars.clone(), i);
             i += value.len() - 1;
 
@@ -118,6 +126,7 @@ pub fn tokenize(code: &str) -> Vec<Token> {
                 "long" => TokenType::Type(VarType::Long),
                 "bool" => TokenType::Type(VarType::Bool),
                 "string" => TokenType::Type(VarType::String),
+                "usize" => TokenType::Type(VarType::Usize),
                 // keywords (add more)
                 "if" => TokenType::Keyword,
                 "else" => TokenType::Keyword,
@@ -176,6 +185,8 @@ pub fn tokenize(code: &str) -> Vec<Token> {
             token = Token::new(String::from("]"), TokenType::RBracket);
         } else if chars[i] == ',' {
             token = Token::new(String::from(","), TokenType::Comma);
+        } else if chars[i] == '.' {
+            token = Token::new(String::from(","), TokenType::Period);
         } else if chars[i] == ';' {
             token = Token::new(String::from(";"), TokenType::Semicolon);
         } else if chars[i] == '=' {
@@ -208,7 +219,13 @@ pub fn tokenize(code: &str) -> Vec<Token> {
 
 fn is_number(string: String) -> bool {
     let mut found_decimal = false;
+    // TODO: check for negative
+    let mut first = true;
     string.chars().all(|c| {
+        if first && c == '-' {
+            first = false;
+            return true;
+        }
         if c == '.' {
             if found_decimal {
                 return false;

@@ -1,0 +1,2 @@
+bool[] v = [true, false];
+print(v.length + usize(1));

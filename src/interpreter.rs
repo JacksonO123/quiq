@@ -2,7 +2,10 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     ast::{Ast, AstNode, AstNodeType, Value},
-    helpers::{ensure_type, flatten_exp, set_var_value, ExpValue},
+    helpers::{
+        cast, ensure_type, flatten_exp, get_array_type, get_eval_value, push_to_array,
+        set_var_value, update_variable, ExpValue,
+    },
     tokenizer::{OperatorType, Token, TokenType},
 };
 
@@ -34,6 +37,7 @@ pub enum Func<'a> {
 
 #[derive(Clone, Debug)]
 pub enum VarType {
+    Usize,
     Int,
     Float,
     Double,
@@ -51,12 +55,14 @@ impl VarType {
             "long" => VarType::Long,
             "string" => VarType::String,
             "bool" => VarType::Bool,
-            _ => panic!("Inable to infer var type from: {}", string),
+            "usize" => VarType::Usize,
+            _ => panic!("Unable to infer var type from: {}", string),
         }
     }
     pub fn get_str(&self) -> &str {
         match self {
             VarType::Int => "int",
+            VarType::Usize => "usize",
             VarType::Float => "float",
             VarType::Double => "double",
             VarType::Long => "long",
@@ -111,6 +117,10 @@ pub fn value_from_token<'a>(
                         let num = t.value.parse::<f64>().unwrap();
                         Value::Double(num)
                     }
+                    VarType::Usize => {
+                        let num = t.value.parse::<usize>().unwrap();
+                        Value::Usize(num)
+                    }
                     VarType::Long => {
                         let num = t.value.parse::<i64>().unwrap();
                         Value::Long(num)
@@ -144,6 +154,7 @@ fn call_func<'a>(
     name: String,
     args: Vec<AstNode<'a>>,
 ) -> Option<Token> {
+    let mut found = false;
     for func in functions.borrow().iter() {
         match func {
             Func::Custom(custom) => {
@@ -153,6 +164,7 @@ fn call_func<'a>(
             }
             Func::Builtin(builtin) => {
                 if builtin.name == name {
+                    found = true;
                     let f = builtin.func;
                     let args = args.iter().map(|a| {
                         let res = eval_node(vars, Rc::clone(&functions), scope, a.clone());
@@ -171,10 +183,15 @@ fn call_func<'a>(
             }
         }
     }
+
+    if !found {
+        panic!("Unknown function: {}", name);
+    }
+
     None
 }
 
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub enum EvalValue {
     Value(Value),
     Token(Token),
@@ -236,6 +253,10 @@ pub fn eval_exp<'a>(
                                                 Value::Long(r) => Some(Value::Long(l * r)),
                                                 _ => panic!("Cannot multiply non-number values, or numbers of different types"),
                                             },
+                                            Value::Usize(l) => match right {
+                                                Value::Usize(r) => Some(Value::Usize(l * r)),
+                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            }
                                             _ => panic!("Cannot multiply non-number values, or numbers of different types"),
                                         }
                                         _ => None
@@ -246,21 +267,25 @@ pub fn eval_exp<'a>(
                                         OperatorType::Div => match left {
                                             Value::Int(l) => match right {
                                                 Value::Int(r) => Some(Value::Int(l / r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
                                             },
                                             Value::Float(l) => match right {
                                                 Value::Float(r) => Some(Value::Float(l / r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
                                             },
                                             Value::Double(l) => match right {
                                                 Value::Double(r) => Some(Value::Double(l / r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
                                             },
                                             Value::Long(l) => match right {
                                                 Value::Long(r) => Some(Value::Long(l / r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
                                             },
-                                            _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            Value::Usize(l) => match right {
+                                                Value::Usize(r) => Some(Value::Usize(l / r)),
+                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
+                                            }
+                                            _ => panic!("Cannot divide non-number values, or numbers of different types"),
                                         }
                                         _ => None
                                     }
@@ -270,21 +295,25 @@ pub fn eval_exp<'a>(
                                         OperatorType::Add => match left {
                                             Value::Int(l) => match right {
                                                 Value::Int(r) => Some(Value::Int(l + r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
                                             },
                                             Value::Float(l) => match right {
                                                 Value::Float(r) => Some(Value::Float(l + r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
                                             },
                                             Value::Double(l) => match right {
                                                 Value::Double(r) => Some(Value::Double(l + r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
                                             },
                                             Value::Long(l) => match right {
                                                 Value::Long(r) => Some(Value::Long(l + r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
                                             },
-                                            _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            Value::Usize(l) => match right {
+                                                Value::Usize(r) => Some(Value::Usize(l + r)),
+                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
+                                            }
+                                            _ => panic!("Cannot add non-number values, or numbers of different types"),
                                         }
                                         _ => None
                                     }
@@ -294,21 +323,25 @@ pub fn eval_exp<'a>(
                                         OperatorType::Sub => match left {
                                             Value::Int(l) => match right {
                                                 Value::Int(r) => Some(Value::Int(l - r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
                                             },
                                             Value::Float(l) => match right {
                                                 Value::Float(r) => Some(Value::Float(l - r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
                                             },
                                             Value::Double(l) => match right {
                                                 Value::Double(r) => Some(Value::Double(l - r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
                                             },
                                             Value::Long(l) => match right {
                                                 Value::Long(r) => Some(Value::Long(l - r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
                                             },
-                                            _ => panic!("Cannot multiply non-number values, or numbers of different types"),
+                                            Value::Usize(l) => match right {
+                                                Value::Usize(r) => Some(Value::Usize(l - r)),
+                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
+                                            }
+                                            _ => panic!("Cannot subtract non-number values, or numbers of different types"),
                                         }
                                         _ => None
                                     }
@@ -348,28 +381,64 @@ pub fn eval_node<'a>(
     node: AstNode<'a>,
 ) -> Option<EvalValue> {
     match node.node_type.clone() {
+        AstNodeType::Cast(var_type, node) => {
+            let res_option = eval_node(vars, Rc::clone(&functions), scope, node.as_ref().clone());
+
+            if let Some(eval_value) = res_option {
+                let val = get_eval_value(vars, eval_value);
+                let casted_value = cast(var_type, val);
+                Some(EvalValue::Value(casted_value))
+            } else {
+                panic!("Error casting value")
+            }
+        }
+        AstNodeType::AccessStructProp(struct_token, prop) => {
+            let value = value_from_token(vars, struct_token.clone(), None);
+
+            match value {
+                Value::Array(mut vals) => match &prop
+                    .get(0)
+                    .expect("Expected property to access on Array")
+                    .node_type
+                {
+                    AstNodeType::CallFunc(name, args) => match name.as_str() {
+                        "push" => {
+                            push_to_array(vars, functions, scope, &mut vals, args);
+                            update_variable(
+                                vars,
+                                scope,
+                                struct_token.clone(),
+                                EvalValue::Value(Value::Array(vals)),
+                            );
+
+                            Some(EvalValue::Token(struct_token))
+                        }
+                        _ => panic!("Unknown array method: {}", name),
+                    },
+                    AstNodeType::Token(t) => match t.token_type {
+                        TokenType::Identifier => match t.value.as_str() {
+                            "length" => Some(EvalValue::Value(Value::Usize(vals.len()))),
+                            _ => unimplemented!(),
+                        },
+                        _ => panic!("Unexpected method: {}", t.value),
+                    },
+                    _ => panic!("Unexpected operation: {:?}", prop),
+                },
+                _ => unimplemented!(),
+            }
+        }
         AstNodeType::Array(arr_nodes) => {
             let mut res_arr: Vec<Value> = Vec::new();
 
             for node in arr_nodes.iter() {
                 let res_option = eval_node(vars, Rc::clone(&functions), scope, node.clone());
                 if let Some(res) = res_option {
-                    let val = match res {
-                        EvalValue::Value(v) => v,
-                        EvalValue::Token(t) => match t.token_type {
-                            TokenType::Number => value_from_token(vars, t, None),
-                            TokenType::String => value_from_token(vars, t, None),
-                            TokenType::Bool => value_from_token(vars, t, None),
-                            TokenType::Identifier => value_from_token(vars, t, None),
-                            _ => panic!("Unexpected token: {}", t.value),
-                        },
-                    };
+                    let val = get_eval_value(vars, res);
                     res_arr.push(val);
                 }
             }
             Some(EvalValue::Value(Value::Array(res_arr)))
         }
-        AstNodeType::CreateArr(val) => Some(EvalValue::Value(val)),
         AstNodeType::If(condition, node) => {
             let condition_res = eval_node(
                 vars,
@@ -416,7 +485,17 @@ pub fn eval_node<'a>(
             if let Some(tok) = value {
                 let val = match tok {
                     EvalValue::Token(t) => value_from_token(vars, t, Some(var_type)),
-                    EvalValue::Value(v) => ensure_type(var_type, v).unwrap(),
+                    EvalValue::Value(v) => ensure_type(var_type.clone(), v.clone()).expect(
+                        format!(
+                            "Unexpected variable type definition, expected {:?} found {:?}",
+                            match v {
+                                Value::Array(arr) => VarType::Array(Box::new(get_array_type(arr))),
+                                _ => panic!(),
+                            },
+                            var_type
+                        )
+                        .as_str(),
+                    ),
                 };
                 let var = VarValue::new(name.value, val, scope);
                 vars.push(var);

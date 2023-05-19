@@ -1,7 +1,7 @@
 use std::{cell::RefCell, rc::Rc};
 
 use crate::{
-    ast::{get_ast_node, AstNode, AstNodeType, Value},
+    ast::{get_ast_node, get_value_arr_str, AstNode, AstNodeType, Value},
     interpreter::{eval_node, value_from_token, EvalValue, Func, VarType, VarValue},
     tokenizer::{Token, TokenType},
 };
@@ -268,9 +268,6 @@ pub fn is_exp(tokens: Vec<Token>) -> bool {
             TokenType::LParen => {
                 open_brackets += 1;
             }
-            TokenType::Type(_) => {
-                res = false;
-            }
             TokenType::EqCompare => {
                 res = false;
             }
@@ -283,6 +280,8 @@ pub fn is_exp(tokens: Vec<Token>) -> bool {
             TokenType::Bang => {
                 res = false;
             }
+            TokenType::Identifier => {}
+            TokenType::Period => {}
             _ => {}
         }
         if !res {
@@ -377,6 +376,10 @@ pub fn create_arr<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
 
 pub fn ensure_type(var_type: VarType, val: Value) -> Option<Value> {
     let valid = match val.clone() {
+        Value::Usize(_) => match var_type {
+            VarType::Usize => true,
+            _ => false,
+        },
         Value::String(_) => match var_type {
             VarType::String => true,
             _ => false,
@@ -421,4 +424,262 @@ pub fn ensure_type(var_type: VarType, val: Value) -> Option<Value> {
     } else {
         None
     }
+}
+
+pub fn get_eval_value(vars: &mut Vec<VarValue>, val: EvalValue) -> Value {
+    match val {
+        EvalValue::Value(v) => v,
+        EvalValue::Token(t) => match t.token_type {
+            TokenType::Number => value_from_token(vars, t, None),
+            TokenType::String => value_from_token(vars, t, None),
+            TokenType::Bool => value_from_token(vars, t, None),
+            TokenType::Identifier => value_from_token(vars, t, None),
+            _ => panic!("Unexpected token: {}", t.value),
+        },
+    }
+}
+
+pub fn push_to_array<'a>(
+    vars: &mut Vec<VarValue>,
+    functions: Rc<RefCell<Vec<Func<'a>>>>,
+    scope: usize,
+    arr: &mut Vec<Value>,
+    args: &Vec<AstNode<'a>>,
+) {
+    let arr_item_type = get_array_type(arr.clone());
+
+    for arg in args.iter() {
+        let arg_res_option = eval_node(vars, Rc::clone(&functions), scope, arg.clone());
+
+        if let Some(arg_res) = arg_res_option {
+            let val = get_eval_value(vars, arg_res);
+            ensure_type(arr_item_type.clone(), val.clone()).expect(
+                format!(
+                    "Error pushing to array, expected type: {:?} found {:?}",
+                    arr_item_type,
+                    get_var_type_from_value(val.clone()),
+                )
+                .as_str(),
+            );
+            arr.push(val);
+        }
+    }
+}
+
+pub fn update_variable(vars: &mut Vec<VarValue>, scope: usize, var_token: Token, val: EvalValue) {
+    let mut i = 0;
+    while i < vars.len() {
+        if vars[i].name == var_token.value && vars[i].scope == scope {
+            break;
+        }
+
+        i += 1;
+    }
+
+    vars[i].value = get_eval_value(vars, val);
+}
+
+fn get_var_type_from_value(val: Value) -> VarType {
+    match val {
+        Value::Usize(_) => VarType::Usize,
+        Value::String(_) => VarType::String,
+        Value::Int(_) => VarType::Int,
+        Value::Float(_) => VarType::Float,
+        Value::Double(_) => VarType::Double,
+        Value::Long(_) => VarType::Long,
+        Value::Bool(_) => VarType::Bool,
+        Value::Array(vals) => VarType::Array(Box::new(get_array_type(vals))),
+    }
+}
+
+pub fn get_array_type(values: Vec<Value>) -> VarType {
+    get_var_type_from_value(values[0].clone())
+}
+
+pub fn create_cast_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
+    let node_tokens = tokens_to_delimiter(tokens.clone(), 2, ")");
+    let node_option = get_ast_node(node_tokens);
+
+    if let Some(node) = node_option {
+        AstNodeType::Cast(VarType::from(tokens[0].value.as_str()), Box::new(node))
+    } else {
+        panic!("")
+    }
+}
+
+pub fn cast(to_type: VarType, val: Value) -> Value {
+    match val {
+        Value::Usize(v) => match to_type {
+            VarType::Usize => val,
+            VarType::Int => Value::Int(v as i32),
+            VarType::Float => Value::Float(v as f32),
+            VarType::Double => Value::Double(v as f64),
+            VarType::Long => Value::Long(v as i64),
+            VarType::String => Value::String(v.to_string()),
+            VarType::Bool => {
+                if v == 0 {
+                    Value::Bool(false)
+                } else if v == 1 {
+                    Value::Bool(true)
+                } else {
+                    panic!("Cannot convert usize to bool")
+                }
+            }
+            VarType::Array(_) => panic!("Cannot convert usize to array"),
+        },
+        Value::String(v) => match to_type {
+            VarType::Usize => {
+                Value::Usize(v.parse::<usize>().expect("Error parsing string to usize"))
+            }
+            VarType::Int => Value::Int(v.parse::<i32>().expect("Error parsing string to int")),
+            VarType::Float => {
+                Value::Float(v.parse::<f32>().expect("Error parsing string to float"))
+            }
+            VarType::Double => {
+                Value::Double(v.parse::<f64>().expect("Error parsing string to double"))
+            }
+            VarType::Long => Value::Long(v.parse::<i64>().expect("Error parsing string to long")),
+            VarType::String => Value::String(v),
+            VarType::Bool => Value::Bool(v.parse::<bool>().expect("Error parsing string to bool")),
+            VarType::Array(_) => panic!("Cannot convert usize to array"),
+        },
+        Value::Int(v) => match to_type {
+            VarType::Usize => Value::Usize(v as usize),
+            VarType::Int => val,
+            VarType::Float => Value::Float(v as f32),
+            VarType::Double => Value::Double(v as f64),
+            VarType::Long => Value::Long(v as i64),
+            VarType::String => Value::String(v.to_string()),
+            VarType::Bool => {
+                if v == 0 {
+                    Value::Bool(false)
+                } else if v == 1 {
+                    Value::Bool(true)
+                } else {
+                    panic!("Cannot convert int to bool")
+                }
+            }
+            VarType::Array(_) => panic!("Cannot convert int to array"),
+        },
+        Value::Float(v) => match to_type {
+            VarType::Usize => Value::Usize(v as usize),
+            VarType::Int => Value::Int(v as i32),
+            VarType::Float => val,
+            VarType::Double => Value::Double(v as f64),
+            VarType::Long => Value::Long(v as i64),
+            VarType::String => Value::String(v.to_string()),
+            VarType::Bool => {
+                if v == 0.0 {
+                    Value::Bool(false)
+                } else if v == 1.0 {
+                    Value::Bool(true)
+                } else {
+                    panic!("Cannot convert float to bool")
+                }
+            }
+            VarType::Array(_) => panic!("Cannot convert float to array"),
+        },
+        Value::Double(v) => match to_type {
+            VarType::Usize => Value::Usize(v as usize),
+            VarType::Int => Value::Int(v as i32),
+            VarType::Float => Value::Float(v as f32),
+            VarType::Double => val,
+            VarType::Long => Value::Long(v as i64),
+            VarType::String => Value::String(v.to_string()),
+            VarType::Bool => {
+                if v == 0.0 {
+                    Value::Bool(false)
+                } else if v == 1.0 {
+                    Value::Bool(true)
+                } else {
+                    panic!("Cannot convert double to bool")
+                }
+            }
+            VarType::Array(_) => panic!("Cannot convert double to array"),
+        },
+        Value::Long(v) => match to_type {
+            VarType::Usize => Value::Usize(v as usize),
+            VarType::Int => Value::Int(v as i32),
+            VarType::Float => Value::Float(v as f32),
+            VarType::Double => Value::Double(v as f64),
+            VarType::Long => val,
+            VarType::String => Value::String(v.to_string()),
+            VarType::Bool => {
+                if v == 0 {
+                    Value::Bool(false)
+                } else if v == 1 {
+                    Value::Bool(true)
+                } else {
+                    panic!("Cannot convert long to bool")
+                }
+            }
+            VarType::Array(_) => panic!("Cannot convert long to array"),
+        },
+        Value::Bool(v) => {
+            let num_val = if v { 1 } else { 0 };
+            match to_type {
+                VarType::Usize => Value::Usize(num_val),
+                VarType::Int => Value::Int(num_val as i32),
+                VarType::Float => Value::Float(num_val as f32),
+                VarType::Double => Value::Double(num_val as f64),
+                VarType::Long => Value::Long(num_val as i64),
+                VarType::String => Value::String(v.to_string()),
+                VarType::Bool => val,
+                VarType::Array(_) => panic!("Cannot convert bool to array"),
+            }
+        }
+        Value::Array(arr) => match to_type {
+            VarType::Usize => panic!("Cannot convert array to usize"),
+            VarType::Int => panic!("Cannot convert array to int"),
+            VarType::Float => panic!("Cannot convert array to float"),
+            VarType::Double => panic!("Cannot convert array to double"),
+            VarType::Long => panic!("Cannot convert array to long"),
+            VarType::String => Value::String(get_value_arr_str(&arr)),
+            VarType::Bool => panic!("Cannot convert array to bool"),
+            VarType::Array(_) => unimplemented!(),
+        },
+    }
+}
+
+pub fn get_struct_access_tokens(tokens: Vec<Token>) -> Vec<Vec<Token>> {
+    let mut res: Vec<Vec<Token>> = vec![vec![]];
+    let mut i = 0;
+
+    let mut open_brackets = 0;
+    while i < tokens.len() {
+        if OPEN_BRACKETS
+            .iter()
+            .position(|&s| tokens[i].value == s)
+            .is_some()
+        {
+            open_brackets += 1;
+        } else if CLOSE_BRACKETS
+            .iter()
+            .position(|&s| tokens[i].value == s)
+            .is_some()
+        {
+            open_brackets -= 1;
+        }
+
+        if open_brackets == 0
+            && match tokens[i].token_type {
+                TokenType::Period => {
+                    res.push(vec![]);
+                    false
+                }
+                TokenType::Identifier => false,
+                TokenType::LParen => false,
+                _ => true,
+            }
+        {
+            break;
+        } else {
+            let index = res.len() - 1;
+            res[index].push(tokens[i].clone());
+        }
+
+        i += 1;
+    }
+
+    res
 }

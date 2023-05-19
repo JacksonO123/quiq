@@ -2,15 +2,33 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     helpers::{
-        create_arr, create_bang_bool, create_func_call_node, create_keyword_node,
-        create_make_var_node, create_set_var_node, get_exp_node, is_exp, tokens_to_delimiter,
+        create_arr, create_bang_bool, create_cast_node, create_func_call_node, create_keyword_node,
+        create_make_var_node, create_set_var_node, get_exp_node, get_struct_access_tokens, is_exp,
+        tokens_to_delimiter,
     },
     interpreter::VarType,
     tokenizer::{Token, TokenType},
 };
 
+pub fn get_value_arr_str(values: &Vec<Value>) -> String {
+    let mut res = String::from("[");
+
+    for (i, item) in values.iter().enumerate() {
+        if i < values.len() - 1 {
+            res.push_str(format!("{}, ", item.get_str()).as_str());
+        } else {
+            res.push_str(item.get_str().as_str());
+        }
+    }
+
+    res.push(']');
+
+    res
+}
+
 #[derive(Clone, Debug)]
 pub enum Value {
+    Usize(usize),
     String(String),
     Int(i32),
     Float(f32),
@@ -22,6 +40,7 @@ pub enum Value {
 impl Value {
     pub fn get_str(&self) -> String {
         match self {
+            Value::Usize(v) => v.to_string(),
             Value::String(v) => v.to_string(),
             Value::Float(v) => v.to_string(),
             Value::Double(v) => v.to_string(),
@@ -31,21 +50,7 @@ impl Value {
                 let res = if *v { "true" } else { "false" };
                 res.to_string()
             }
-            Value::Array(arr) => {
-                let mut res = String::from("[");
-
-                for (i, item) in arr.iter().enumerate() {
-                    if i < arr.len() - 1 {
-                        res.push_str(format!("{}, ", item.get_str()).as_str());
-                    } else {
-                        res.push_str(item.get_str().as_str());
-                    }
-                }
-
-                res.push(']');
-
-                res
-            }
+            Value::Array(arr) => get_value_arr_str(arr),
         }
     }
 }
@@ -61,8 +66,10 @@ pub enum AstNodeType<'a> {
     Bang(Box<AstNode<'a>>),
     Exp(Vec<Box<AstNode<'a>>>),
     If(Box<AstNode<'a>>, Box<AstNode<'a>>),
-    CreateArr(Value), // possibly change
     Array(Vec<AstNode<'a>>),
+    AccessStructProp(Token, Vec<AstNode<'a>>),
+    /// to, node
+    Cast(VarType, Box<AstNode<'a>>),
 }
 
 #[derive(Clone, Debug)]
@@ -78,8 +85,13 @@ impl<'a> AstNode<'a> {
     }
     pub fn get_str(&self) -> String {
         match &self.node_type {
+            AstNodeType::Cast(var_type, node) => {
+                format!("Casting {:?} to {:?}", node, var_type)
+            }
+            AstNodeType::AccessStructProp(struct_token, prop) => {
+                format!("Accessing {:?} on {:?}", prop, struct_token)
+            }
             AstNodeType::Array(arr) => format!("{:?}", arr),
-            AstNodeType::CreateArr(val) => format!("[{}]", val.get_str()),
             AstNodeType::If(condition, node) => {
                 format!("If: {} ::then:: {}", condition.get_str(), node.get_str())
             }
@@ -178,11 +190,30 @@ pub fn get_ast_node<'a>(tokens: Vec<Token>) -> Option<AstNode<'a>> {
         }
 
         let node_type = match tokens[0].token_type {
-            TokenType::Type(_) => Some(create_make_var_node(tokens)),
+            TokenType::Type(_) => match tokens[1].token_type {
+                TokenType::LParen => Some(create_cast_node(tokens)),
+                _ => Some(create_make_var_node(tokens)),
+            },
             TokenType::Identifier => match tokens[1].token_type {
                 TokenType::LParen => Some(create_func_call_node(tokens)),
                 TokenType::EqSet => Some(create_set_var_node(tokens)),
-                _ => unimplemented!(),
+                TokenType::Period => {
+                    let mut tokens_clone = tokens.clone();
+                    tokens_clone.remove(0);
+                    tokens_clone.remove(0);
+
+                    let mut access_token_nodes: Vec<AstNode> = Vec::new();
+                    let tokens_clone = get_struct_access_tokens(tokens_clone);
+                    for token_clone in tokens_clone.iter() {
+                        let res = get_ast_node(token_clone.clone()).unwrap();
+                        access_token_nodes.push(res);
+                    }
+                    Some(AstNodeType::AccessStructProp(
+                        tokens[0].clone(),
+                        access_token_nodes,
+                    ))
+                }
+                _ => unimplemented!("NOT IMPLEMENTED: {:?}", tokens),
             },
             TokenType::NewLine => None,
             TokenType::Bang => Some(create_bang_bool(tokens)),

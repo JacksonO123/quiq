@@ -1,2 +1,4 @@
-bool[][] v = [[false, true], [true, false]];
+bool[][] v = [[true, false]];
+v.push([true]);
 print(v);
+print(v.length);

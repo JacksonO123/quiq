@@ -93,11 +93,11 @@ fn main() {
     // print_vars(&vars);
 }
 
-fn print_vars<'a>(vars: &'a Vec<VarValue>) {
-    for var in vars.iter() {
-        println!("{}", var.get_str());
-    }
-}
+// fn print_vars<'a>(vars: &'a Vec<VarValue>) {
+//     for var in vars.iter() {
+//         println!("{}", var.get_str());
+//     }
+// }
 
 fn get_file(name: &str) -> String {
     let path_str = "src/input/".to_owned() + name;
