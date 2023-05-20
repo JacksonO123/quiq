@@ -54,7 +54,7 @@ impl Token {
     }
 }
 
-fn get_full_token<'a>(chars: Vec<char>, start: usize) -> String {
+fn get_full_token<'a>(chars: &Vec<char>, start: usize) -> String {
     let mut res = String::new();
 
     let mut dot_found = false;
@@ -79,7 +79,7 @@ fn get_full_token<'a>(chars: Vec<char>, start: usize) -> String {
     res
 }
 
-fn get_string_token<'a>(chars: Vec<char>, start: usize) -> String {
+fn get_string_token<'a>(chars: &Vec<char>, start: usize) -> String {
     let mut res = String::new();
     let mut i = start + 1;
     while i < chars.len() {
@@ -95,7 +95,7 @@ fn get_string_token<'a>(chars: Vec<char>, start: usize) -> String {
     res
 }
 
-fn get_full_line<'a>(chars: Vec<char>, start: usize) -> String {
+fn get_full_line<'a>(chars: &Vec<char>, start: usize) -> String {
     let mut res = String::new();
     let mut i = start;
     while i < chars.len() {
@@ -121,7 +121,8 @@ pub fn tokenize(code: &str) -> Vec<Token> {
             || chars[i].is_numeric()
             || (i < chars.len() - 1 && chars[i] == '-' && chars[i + 1].is_numeric())
         {
-            let value = get_full_token(chars.clone(), i);
+            let value = get_full_token(&chars, i);
+
             i += value.len() - 1;
 
             let token_type = match value.as_str() {
@@ -155,12 +156,12 @@ pub fn tokenize(code: &str) -> Vec<Token> {
             };
             token = Token::new_from_string(value, token_type);
         } else if chars[i] == '"' {
-            let string = get_string_token(chars.clone(), i);
-            i += string.len();
+            let string = get_string_token(&chars, i);
+            i += string.len() + 1;
 
             token = Token::new_from_string(string, TokenType::String);
         } else if i < chars.len() - 2 && chars[i] == '/' && chars[i + 1] == '/' {
-            let line = get_full_line(chars.clone(), i);
+            let line = get_full_line(&chars, i);
             i += line.len();
 
             token = Token::new_from_string(line, TokenType::Comment);
@@ -192,7 +193,7 @@ pub fn tokenize(code: &str) -> Vec<Token> {
         } else if chars[i] == ',' {
             token = Token::new(",", TokenType::Comma);
         } else if chars[i] == '.' {
-            token = Token::new(",", TokenType::Period);
+            token = Token::new(".", TokenType::Period);
         } else if chars[i] == ';' {
             token = Token::new(";", TokenType::Semicolon);
         } else if chars[i] == '=' {
@@ -220,6 +221,7 @@ pub fn tokenize(code: &str) -> Vec<Token> {
 
         i += 1;
     }
+
     tokens
 }
 

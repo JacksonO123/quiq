@@ -4,7 +4,7 @@ use crate::{
     helpers::{
         create_arr, create_bang_bool, create_cast_node, create_func_call_node, create_keyword_node,
         create_make_var_node, create_set_var_node, get_exp_node, get_struct_access_tokens, is_exp,
-        tokens_to_delimiter,
+        is_sequence,
     },
     interpreter::VarType,
     tokenizer::{Token, TokenType},
@@ -148,14 +148,6 @@ impl<'a> Ast<'a> {
         let node = AstNode::new_ptr(AstNodeType::StatementSeq(vec![]));
         Self { node }
     }
-    fn add(&mut self, node: Rc<RefCell<AstNode<'a>>>) {
-        match &mut self.node.borrow_mut().node_type {
-            AstNodeType::StatementSeq(seq) => {
-                seq.push(node);
-            }
-            _ => {}
-        }
-    }
 }
 
 pub fn get_ast_node<'a>(tokens: &Vec<Token>) -> Option<AstNode<'a>> {
@@ -166,6 +158,11 @@ pub fn get_ast_node<'a>(tokens: &Vec<Token>) -> Option<AstNode<'a>> {
         let res = Some(AstNode::new(AstNodeType::Token(tokens[0].clone())));
         res
     } else {
+        if is_sequence(&tokens) {
+            let sequence_node = generate_sequence_node(tokens);
+            return Some(AstNode::new(sequence_node));
+        }
+
         while tokens.len() > 0
             && match tokens[0].token_type {
                 TokenType::NewLine => true,
@@ -208,7 +205,7 @@ pub fn get_ast_node<'a>(tokens: &Vec<Token>) -> Option<AstNode<'a>> {
                         access_token_nodes,
                     ))
                 }
-                _ => unimplemented!("NOT IMPLEMENTED: {:?}", tokens),
+                _ => unimplemented!(),
             },
             TokenType::NewLine => None,
             TokenType::Bang => Some(create_bang_bool(tokens)),
@@ -234,8 +231,38 @@ pub fn get_ast_node<'a>(tokens: &Vec<Token>) -> Option<AstNode<'a>> {
     }
 }
 
-pub fn generate_tree<'a>(tokens: Vec<Token>) -> Ast<'a> {
-    let mut tree = Ast::new();
+fn get_sequence_slice(tokens: &Vec<Token>, start: usize) -> Vec<Token> {
+    let mut slice: Vec<Token> = Vec::new();
+    let mut search_for_close_brace = false;
+
+    for i in start..tokens.len() {
+        slice.push(tokens[i].clone());
+        match tokens[i].token_type {
+            TokenType::Semicolon => {
+                if !search_for_close_brace {
+                    break;
+                }
+            }
+            TokenType::LBrace => {
+                search_for_close_brace = true;
+            }
+            TokenType::RBrace => {
+                search_for_close_brace = false;
+                break;
+            }
+            _ => {}
+        }
+    }
+
+    if search_for_close_brace {
+        panic!("Expected token: \"}}\"");
+    }
+
+    slice
+}
+
+fn generate_sequence_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
+    let mut seq: Vec<Rc<RefCell<AstNode>>> = Vec::new();
 
     let mut i = 0;
     while i < tokens.len() {
@@ -247,15 +274,26 @@ pub fn generate_tree<'a>(tokens: Vec<Token>) -> Ast<'a> {
             _ => {}
         }
 
-        let token_slice = tokens_to_delimiter(&tokens, i, ";");
+        let token_slice = get_sequence_slice(&tokens, i);
         let token_num = token_slice.len();
 
         let node_option = get_ast_node(&token_slice);
         if let Some(node) = node_option {
             let ptr = Rc::new(RefCell::new(node));
-            tree.add(ptr);
+            seq.push(ptr);
         }
         i += token_num + 1;
+    }
+
+    AstNodeType::StatementSeq(seq)
+}
+
+pub fn generate_tree<'a>(tokens: Vec<Token>) -> Ast<'a> {
+    let mut tree = Ast::new();
+
+    let node_option = get_ast_node(&tokens);
+    if let Some(node) = node_option {
+        tree.node = Rc::new(RefCell::new(node));
     }
 
     tree

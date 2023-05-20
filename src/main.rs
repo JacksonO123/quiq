@@ -5,6 +5,7 @@ mod interpreter;
 mod tokenizer;
 
 use std::cell::RefCell;
+use std::collections::HashMap;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Instant;
@@ -39,7 +40,8 @@ fn main() {
     let tree_end = tree_start.elapsed();
     // tree.print();
 
-    let mut vars: Vec<VarValue> = Vec::new();
+    // let mut vars: Vec<Rc<RefCell<VarValue>>> = Vec::new();
+    let mut vars: HashMap<String, Rc<RefCell<VarValue>>> = HashMap::new();
     let functions = Rc::new(RefCell::new(Vec::new()));
 
     init_builtins(&mut vars, Rc::clone(&functions));
@@ -93,9 +95,9 @@ fn main() {
     // print_vars(&vars);
 }
 
-// fn print_vars<'a>(vars: &'a Vec<VarValue>) {
+// fn print_vars<'a>(vars: &'a Vec<Rc<RefCell<VarValue>>>) {
 //     for var in vars.iter() {
-//         println!("{}", var.get_str());
+//         println!("{}", var.borrow().get_str());
 //     }
 // }
 

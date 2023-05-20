@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     ast::{get_ast_node, get_value_arr_str, AstNode, AstNodeType, Value},
@@ -27,9 +27,9 @@ pub fn create_make_var_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
         })
         .unwrap();
 
-    let value_to_set = tokens_to_delimiter(&tokens, eq_pos + 1, ";");
+    let mut value_to_set = tokens_to_delimiter(&tokens, eq_pos + 1, ";");
 
-    let node = get_ast_node(&value_to_set);
+    let node = get_ast_node(&mut value_to_set);
     if node.is_none() {
         panic!("Invalid value, expected value to set variable");
     }
@@ -42,8 +42,8 @@ pub fn create_make_var_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
 }
 
 pub fn create_set_var_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
-    let value_to_set = tokens_to_delimiter(&tokens, 2, ";");
-    let node = get_ast_node(&value_to_set);
+    let mut value_to_set = tokens_to_delimiter(&tokens, 2, ";");
+    let node = get_ast_node(&mut value_to_set);
     if node.is_none() {
         panic!("Invalid value, expected value to set variable");
     }
@@ -53,13 +53,13 @@ pub fn create_set_var_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
 pub fn create_keyword_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
     match tokens[0].value.as_str() {
         "if" => {
-            let condition = tokens_to_delimiter(&tokens, 2, ")");
+            let mut condition = tokens_to_delimiter(&tokens, 2, ")");
             let condition_len = condition.len();
-            let condition_node = get_ast_node(&condition);
+            let condition_node = get_ast_node(&mut condition);
 
             // + 4 because tokens: [if, (, ), {]
-            let tokens_to_run = tokens_to_delimiter(&tokens, condition_len + 4, "}");
-            let to_run_node = get_ast_node(&tokens_to_run);
+            let mut tokens_to_run = tokens_to_delimiter(&tokens, condition_len + 4, "}");
+            let to_run_node = get_ast_node(&mut tokens_to_run);
 
             if let Some(c_node) = condition_node {
                 if let Some(tr_node) = to_run_node {
@@ -79,10 +79,9 @@ pub fn create_keyword_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
 }
 
 fn get_params<'a>(tokens: Vec<Token>) -> Vec<AstNode<'a>> {
-    // TODO: allow for multiple params, reliable
-    let mut tokens_between_parens: Vec<Token> = Vec::new();
+    let mut arg_nodes: Vec<AstNode> = Vec::new();
+    let mut temp_tokens: Vec<Token> = Vec::new();
     let mut i = 2;
-    let mut end_found = false;
 
     let mut num_open_parens = 0;
 
@@ -97,26 +96,42 @@ fn get_params<'a>(tokens: Vec<Token>) -> Vec<AstNode<'a>> {
             _ => {}
         }
 
-        if num_open_parens >= 0 {
-            tokens_between_parens.push(tokens[i].clone());
-            end_found = true;
-        } else {
+        if num_open_parens < 0 {
             break;
+        }
+
+        match tokens[i].token_type {
+            TokenType::Comma => {
+                let arg_node_option = get_ast_node(&mut temp_tokens);
+                if let Some(arg_node) = arg_node_option {
+                    arg_nodes.push(arg_node);
+                } else {
+                    panic!("Error in function parameters");
+                }
+                temp_tokens = Vec::new();
+            }
+            _ => {
+                temp_tokens.push(tokens[i].clone());
+            }
         }
 
         i += 1;
     }
 
-    if !end_found {
+    if num_open_parens >= 0 {
         panic!("Expected token: )");
     }
 
-    let res_option = get_ast_node(&tokens_between_parens);
-    if let Some(res) = res_option {
-        vec![res]
-    } else {
-        vec![]
+    if temp_tokens.len() > 0 {
+        let arg_node_option = get_ast_node(&mut temp_tokens);
+        if let Some(arg_node) = arg_node_option {
+            arg_nodes.push(arg_node);
+        } else {
+            panic!("Error in function parameters");
+        }
     }
+
+    arg_nodes
 }
 
 pub fn create_func_call_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
@@ -124,16 +139,26 @@ pub fn create_func_call_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
     AstNodeType::CallFunc(tokens[0].value.clone(), params)
 }
 
-pub fn set_var_value<'a>(vars: &mut Vec<VarValue>, name: &'a str, value: Value) {
-    let mut found = false;
-    for var in vars.iter_mut() {
-        if var.name == name {
-            var.value = value;
-            found = true;
-            break;
+pub fn set_var_value<'a>(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    name: &'a str,
+    value: Value,
+) {
+    let res_option = vars.get(name);
+    if let Some(res) = res_option {
+        let mut value_ref = res.borrow_mut();
+        let var_value = &value_ref.value;
+        let var_value_type = get_var_type_from_value(var_value);
+        if ensure_type(&var_value_type, &value) {
+            value_ref.value = value;
+        } else {
+            panic!(
+                "expected type: {:?} found {:?}",
+                var_value_type,
+                get_var_type_from_value(&value)
+            );
         }
-    }
-    if !found {
+    } else {
         panic!("Cannot set value of undefined variable: {}", name);
     }
 }
@@ -221,7 +246,7 @@ pub fn get_exp_node<'a>(tokens: Vec<Token>) -> Vec<Box<AstNode<'a>>> {
             _ => {}
         }
 
-        let to_op = tokens_to_operator(tokens.clone(), i);
+        let mut to_op = tokens_to_operator(tokens.clone(), i);
 
         if to_op.len() > 0 {
             if match to_op[0].token_type {
@@ -234,7 +259,7 @@ pub fn get_exp_node<'a>(tokens: Vec<Token>) -> Vec<Box<AstNode<'a>>> {
                 let node = AstNode::new(AstNodeType::Exp(exp_nodes));
                 res.push(Box::new(node));
             } else {
-                let node_option = get_ast_node(&to_op);
+                let node_option = get_ast_node(&mut to_op);
                 if let Some(node) = node_option {
                     res.push(Box::new(node));
                 }
@@ -306,7 +331,7 @@ pub enum ExpValue {
 }
 
 pub fn flatten_exp<'a>(
-    vars: &mut Vec<VarValue>,
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
     exp: Vec<Box<AstNode<'a>>>,
@@ -319,7 +344,7 @@ pub fn flatten_exp<'a>(
             let val = match tok {
                 EvalValue::Token(tok) => match tok.token_type {
                     TokenType::Operator(_) => ExpValue::Operator(tok.token_type),
-                    _ => ExpValue::Value(value_from_token(vars, &tok, None)),
+                    _ => ExpValue::Value(value_from_token(&tok, None)),
                 },
                 EvalValue::Value(val) => ExpValue::Value(val),
             };
@@ -334,7 +359,7 @@ pub fn create_bang_bool<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
     let mut new_tokens = tokens.clone();
     new_tokens.remove(0);
 
-    let ast_node = get_ast_node(&new_tokens);
+    let ast_node = get_ast_node(&mut new_tokens);
 
     if let Some(node) = ast_node {
         AstNodeType::Bang(Box::new(node))
@@ -350,7 +375,7 @@ fn create_arr_with_tokens<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
     let mut arr_values: Vec<AstNode> = Vec::new();
 
     while node_tokens.len() > 0 {
-        let node_option = get_ast_node(&node_tokens);
+        let node_option = get_ast_node(&mut node_tokens);
 
         if let Some(node) = node_option {
             arr_values.push(node);
@@ -436,21 +461,21 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
     }
 }
 
-pub fn get_eval_value(vars: &mut Vec<VarValue>, val: EvalValue) -> Value {
+pub fn get_eval_value(val: EvalValue) -> Value {
     match val {
         EvalValue::Value(v) => v,
         EvalValue::Token(t) => match t.token_type {
-            TokenType::Number => value_from_token(vars, &t, None),
-            TokenType::String => value_from_token(vars, &t, None),
-            TokenType::Bool => value_from_token(vars, &t, None),
-            TokenType::Identifier => value_from_token(vars, &t, None),
+            TokenType::Number => value_from_token(&t, None),
+            TokenType::String => value_from_token(&t, None),
+            TokenType::Bool => value_from_token(&t, None),
+            TokenType::Identifier => value_from_token(&t, None),
             _ => panic!("Unexpected token: {}", t.value),
         },
     }
 }
 
 pub fn push_to_array<'a>(
-    vars: &mut Vec<VarValue>,
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
     arr: &mut Vec<Value>,
@@ -462,7 +487,7 @@ pub fn push_to_array<'a>(
         let arg_res_option = eval_node(vars, Rc::clone(&functions), scope, arg);
 
         if let Some(arg_res) = arg_res_option {
-            let val = get_eval_value(vars, arg_res);
+            let val = get_eval_value(arg_res);
             if !ensure_type(&arr_item_type, &val) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
@@ -473,19 +498,6 @@ pub fn push_to_array<'a>(
             arr.push(val);
         }
     }
-}
-
-pub fn update_variable(vars: &mut Vec<VarValue>, scope: usize, var_token: Token, val: EvalValue) {
-    let mut i = 0;
-    while i < vars.len() {
-        if vars[i].name == var_token.value && vars[i].scope == scope {
-            break;
-        }
-
-        i += 1;
-    }
-
-    vars[i].value = get_eval_value(vars, val);
 }
 
 fn get_var_type_from_value(val: &Value) -> VarType {
@@ -695,6 +707,16 @@ pub fn get_struct_access_tokens(tokens: Vec<Token>) -> Vec<Vec<Token>> {
                 _ => true,
             }
         {
+            let index = res.len() - 1;
+            res[index].push(tokens[i].clone());
+            if i + 1 < tokens.len()
+                && match tokens[i + 1].token_type {
+                    TokenType::Semicolon => true,
+                    _ => false,
+                }
+            {
+                res[index].push(tokens[i + 1].clone());
+            }
             break;
         } else {
             let index = res.len() - 1;
@@ -705,4 +727,42 @@ pub fn get_struct_access_tokens(tokens: Vec<Token>) -> Vec<Vec<Token>> {
     }
 
     res
+}
+
+pub fn is_sequence(tokens: &Vec<Token>) -> bool {
+    let mut open_brackets = 0;
+    let mut semicolons = 0;
+
+    for i in 0..tokens.len() {
+        match tokens[i].token_type {
+            TokenType::LParen => {
+                open_brackets += 1;
+            }
+            TokenType::RParen => {
+                open_brackets -= 1;
+            }
+            TokenType::LBrace => {
+                open_brackets += 1;
+            }
+            TokenType::RBrace => {
+                open_brackets -= 1;
+            }
+            TokenType::LBracket => {
+                open_brackets += 1;
+            }
+            TokenType::RBracket => {
+                open_brackets -= 1;
+            }
+            TokenType::Semicolon => {
+                if i < tokens.len() - 1 && open_brackets == 0 {
+                    semicolons += 1;
+                }
+            }
+            _ => {}
+        }
+    }
+
+    // <= 1 because sequences with 1 semicolon can be
+    // seen as single lines
+    open_brackets == 0 && semicolons > 0
 }

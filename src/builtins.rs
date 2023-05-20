@@ -1,16 +1,33 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::interpreter::{BuiltinFunc, Func, VarValue};
+use crate::{
+    interpreter::{get_var_ptr, value_from_token, BuiltinFunc, EvalValue, Func, VarValue},
+    tokenizer::TokenType,
+};
 
-pub fn init_builtins(vars: &mut Vec<VarValue>, functions: Rc<RefCell<Vec<Func>>>) {
+pub fn init_builtins(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    functions: Rc<RefCell<Vec<Func>>>,
+) {
     functions
         .borrow_mut()
-        .push(Func::Builtin(BuiltinFunc::new("print", |params| {
+        .push(Func::Builtin(BuiltinFunc::new("print", |vars, params| {
             for (i, param) in params.iter().enumerate() {
+                let to_print = match param {
+                    EvalValue::Value(val) => val.get_str(),
+                    EvalValue::Token(tok) => match tok.token_type {
+                        TokenType::Identifier => {
+                            let var_ptr = get_var_ptr(vars, &tok.value);
+                            let var_value = &var_ptr.borrow().value;
+                            var_value.get_str()
+                        }
+                        _ => value_from_token(tok, None).get_str(),
+                    },
+                };
                 if i < params.len() - 1 {
-                    print!("{}, ", param.get_str());
+                    print!("{}, ", to_print);
                 } else {
-                    print!("{}", param.get_str());
+                    print!("{}", to_print);
                 }
             }
             println!();
