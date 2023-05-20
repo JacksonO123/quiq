@@ -111,7 +111,7 @@ impl<'a> AstNode<'a> {
                 )
             }
             AstNodeType::SetVar(name, value) => {
-                format!("Setting {} to {}", name.get_str(), value.get_str().as_str())
+                format!("Setting {} to {}", name.value, value.get_str().as_str())
             }
             AstNodeType::Token(t) => t.value.to_string(),
             AstNodeType::CallFunc(name, args) => {
@@ -154,8 +154,7 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token>>) -> Option<AstNode<'a>> 
     if tokens.len() == 0 {
         None
     } else if tokens.len() == 1 {
-        let res = Some(AstNode::new(AstNodeType::Token(tokens[0].take().unwrap())));
-        res
+        Some(AstNode::new(AstNodeType::Token(tokens[0].take().unwrap())))
     } else {
         if is_sequence(tokens) {
             let sequence_node = generate_sequence_node(tokens);
@@ -177,14 +176,10 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token>>) -> Option<AstNode<'a>> 
         }
 
         let node_type = match tokens[0].as_ref().unwrap().token_type {
-            TokenType::Type(_) => {
-                let res = match tokens[1].as_ref().unwrap().token_type {
-                    TokenType::LParen => Some(create_cast_node(tokens)),
-                    _ => Some(create_make_var_node(tokens)),
-                };
-
-                res
-            }
+            TokenType::Type(_) => match tokens[1].as_ref().unwrap().token_type {
+                TokenType::LParen => Some(create_cast_node(tokens)),
+                _ => Some(create_make_var_node(tokens)),
+            },
             TokenType::Identifier => match tokens[1].as_ref().unwrap().token_type {
                 TokenType::LParen => Some(create_func_call_node(tokens)),
                 TokenType::EqSet => Some(create_set_var_node(tokens)),
@@ -210,23 +205,17 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token>>) -> Option<AstNode<'a>> 
             TokenType::Bang => Some(create_bang_bool(tokens)),
             TokenType::String => Some(AstNodeType::Token(tokens[0].take().unwrap())),
             TokenType::Keyword => Some(create_keyword_node(tokens)),
-            TokenType::LBracket => {
-                let res = Some(create_arr(tokens));
-
-                res
-            }
+            TokenType::LBracket => Some(create_arr(tokens)),
             _ => {
                 panic!("Token not implemented: {:?}", tokens)
             }
         };
 
-        let res = if let Some(nt) = node_type {
+        if let Some(nt) = node_type {
             Some(AstNode::new(nt))
         } else {
             None
-        };
-
-        res
+        }
     }
 }
 

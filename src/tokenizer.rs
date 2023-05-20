@@ -49,9 +49,6 @@ impl Token {
             token_type,
         }
     }
-    pub fn get_str(&self) -> String {
-        self.value.clone()
-    }
 }
 
 fn get_full_token<'a>(chars: &Vec<char>, start: usize) -> String {

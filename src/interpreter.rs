@@ -103,7 +103,7 @@ pub fn get_var_ptr<'a>(
     panic!("Undefined variable: {}", name);
 }
 
-pub fn value_from_token<'a>(t: &Token, value_type: Option<VarType>) -> Value {
+pub fn value_from_token<'a>(t: &Token, value_type: Option<&VarType>) -> Value {
     match t.token_type {
         TokenType::Number => {
             if let Some(vt) = value_type {
@@ -148,7 +148,7 @@ pub fn value_from_token<'a>(t: &Token, value_type: Option<VarType>) -> Value {
         TokenType::Identifier => {
             panic!("Cannot get token value of identifier");
         }
-        _ => panic!("Cannot get value from token: {}", t.get_str()),
+        _ => panic!("Cannot get value from token: {}", t.value),
     }
 }
 
@@ -156,8 +156,8 @@ fn call_func<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
-    name: String,
-    args: Vec<AstNode<'a>>,
+    name: &String,
+    args: &Vec<AstNode<'a>>,
 ) -> Option<Token> {
     let mut found = false;
     for func in functions.borrow().iter() {
@@ -203,7 +203,7 @@ pub fn eval_exp<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
-    exp: Vec<Box<AstNode<'a>>>,
+    exp: &Vec<Box<AstNode<'a>>>,
 ) -> EvalValue {
     let mut flattened = flatten_exp(vars, functions, scope, exp);
 
@@ -219,18 +219,18 @@ pub fn eval_exp<'a>(
     for current_op in pemdas_operations.iter() {
         let mut i = 0;
         while i < flattened.len() {
-            match &flattened[i] {
+            match &flattened[i].as_ref().unwrap() {
                 ExpValue::Operator(tok) => {
                     match tok {
                         TokenType::Operator(op_type) => {
                             let left = &flattened[i - 1];
                             let right = &flattened[i + 1];
 
-                            let left = match left {
+                            let left = match left.as_ref().unwrap() {
                                 ExpValue::Value(val) => val,
                                 ExpValue::Operator(_) => panic!("Unexpected operator"),
                             };
-                            let right = match right {
+                            let right = match right.as_ref().unwrap() {
                                 ExpValue::Value(val) => val,
                                 ExpValue::Operator(_) => panic!("Unexpected operator"),
                             };
@@ -351,7 +351,7 @@ pub fn eval_exp<'a>(
                             };
 
                             if let Some(val) = new_value {
-                                flattened[i - 1] = ExpValue::Value(val);
+                                flattened[i - 1] = Some(ExpValue::Value(val));
                                 flattened.remove(i);
                                 flattened.remove(i);
                                 i -= 1;
@@ -367,8 +367,8 @@ pub fn eval_exp<'a>(
         }
     }
 
-    match &flattened[0] {
-        ExpValue::Value(val) => EvalValue::Value(val.clone()),
+    match flattened[0].take().unwrap() {
+        ExpValue::Value(val) => EvalValue::Value(val),
         _ => panic!("Invalid token resulting from expression"),
     }
 }
@@ -382,7 +382,7 @@ pub fn eval_node<'a>(
     scope: usize,
     node: &AstNode<'a>,
 ) -> Option<EvalValue> {
-    match node.node_type.clone() {
+    match &node.node_type {
         AstNodeType::Cast(var_type, node) => {
             let res_option = eval_node(vars, Rc::clone(&functions), scope, node.as_ref());
 
@@ -409,7 +409,7 @@ pub fn eval_node<'a>(
                     AstNodeType::CallFunc(name, args) => match name.as_str() {
                         "push" => {
                             push_to_array(vars, Rc::clone(&functions), scope, vals, args);
-                            Some(EvalValue::Token(struct_token))
+                            None
                         }
                         _ => panic!("Unknown array method: {}", name),
                     },
@@ -509,7 +509,7 @@ pub fn eval_node<'a>(
                     }
                 };
                 let var = Rc::new(RefCell::new(VarValue::new(name.value.clone(), val, scope)));
-                vars.insert(name.value, var);
+                vars.insert(name.value.clone(), var);
             } else {
                 panic!("Expected {} found void", var_type.get_str());
             }
@@ -526,7 +526,7 @@ pub fn eval_node<'a>(
             }
             None
         }
-        AstNodeType::Token(token) => Some(EvalValue::Token(token)),
+        AstNodeType::Token(token) => Some(EvalValue::Token(token.to_owned())),
         AstNodeType::CallFunc(name, args) => {
             let func_res = call_func(vars, functions, scope, name, args);
             if let Some(tok) = func_res {

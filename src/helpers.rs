@@ -254,7 +254,7 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Box<AstNode<'a>>
                 _ => false,
             } {
                 let slice = &to_op[1..to_op.len() - 1];
-                let mut slice: Vec<Option<Token>> = slice.iter().map(|t| t.clone()).collect();
+                let mut slice: Vec<Option<Token>> = slice.iter().map(|t| t.to_owned()).collect();
                 let exp_nodes = get_exp_node(&mut slice);
                 let node = AstNode::new(AstNodeType::Exp(exp_nodes));
                 res.push(Box::new(node));
@@ -334,9 +334,9 @@ pub fn flatten_exp<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
-    exp: Vec<Box<AstNode<'a>>>,
-) -> Vec<ExpValue> {
-    let mut res: Vec<ExpValue> = Vec::new();
+    exp: &Vec<Box<AstNode<'a>>>,
+) -> Vec<Option<ExpValue>> {
+    let mut res = vec![];
 
     for exp_node in exp.iter() {
         let tok_option = eval_node(vars, Rc::clone(&functions), scope, exp_node.as_ref());
@@ -348,7 +348,7 @@ pub fn flatten_exp<'a>(
                 },
                 EvalValue::Value(val) => ExpValue::Value(val),
             };
-            res.push(val);
+            res.push(Some(val));
         }
     }
 
@@ -537,7 +537,7 @@ pub fn create_cast_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> 
     }
 }
 
-pub fn cast(to_type: VarType, val: Value) -> Value {
+pub fn cast(to_type: &VarType, val: Value) -> Value {
     match val {
         Value::Usize(v) => match to_type {
             VarType::Usize => val,
