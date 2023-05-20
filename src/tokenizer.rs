@@ -111,7 +111,7 @@ fn get_full_line<'a>(chars: &Vec<char>, start: usize) -> String {
     res
 }
 
-pub fn tokenize(code: &str) -> Vec<Token> {
+pub fn tokenize(code: &str) -> Vec<Option<Token>> {
     let mut tokens = Vec::new();
     let mut i = 0;
     let chars: Vec<char> = code.chars().collect();
@@ -215,7 +215,7 @@ pub fn tokenize(code: &str) -> Vec<Token> {
         match token.token_type {
             TokenType::Comment => {}
             _ => {
-                tokens.push(token);
+                tokens.push(Some(token));
             }
         }
 
@@ -227,7 +227,6 @@ pub fn tokenize(code: &str) -> Vec<Token> {
 
 fn is_number(string: &String) -> bool {
     let mut found_decimal = false;
-    // TODO: check for negative
     let mut first = true;
     string.chars().all(|c| {
         if first && c == '-' {

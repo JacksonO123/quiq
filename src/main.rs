@@ -32,11 +32,11 @@ fn main() {
     let file_end = file_start.elapsed();
 
     let tokens_start = Instant::now();
-    let tokens = tokenize(file.as_str());
+    let mut tokens = tokenize(file.as_str());
     let tokens_end = tokens_start.elapsed();
 
     let tree_start = Instant::now();
-    let tree = generate_tree(tokens);
+    let tree = generate_tree(&mut tokens);
     let tree_end = tree_start.elapsed();
     // tree.print();
 
