@@ -51,7 +51,7 @@ pub fn create_set_var_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
 }
 
 pub fn create_keyword_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
-    match tokens[0].value.clone().as_str() {
+    match tokens[0].value.as_str() {
         "if" => {
             let condition = tokens_to_delimiter(&tokens, 2, ")");
             let condition_len = condition.len();
@@ -121,10 +121,10 @@ fn get_params<'a>(tokens: Vec<Token>) -> Vec<AstNode<'a>> {
 
 pub fn create_func_call_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
     let params = get_params(tokens.clone());
-    AstNodeType::CallFunc(tokens[0].clone().value, params)
+    AstNodeType::CallFunc(tokens[0].value.clone(), params)
 }
 
-pub fn set_var_value<'a>(vars: &mut Vec<VarValue>, name: String, value: Value) {
+pub fn set_var_value<'a>(vars: &mut Vec<VarValue>, name: &'a str, value: Value) {
     let mut found = false;
     for var in vars.iter_mut() {
         if var.name == name {
@@ -319,7 +319,7 @@ pub fn flatten_exp<'a>(
             let val = match tok {
                 EvalValue::Token(tok) => match tok.token_type {
                     TokenType::Operator(_) => ExpValue::Operator(tok.token_type),
-                    _ => ExpValue::Value(value_from_token(vars, tok, None)),
+                    _ => ExpValue::Value(value_from_token(vars, &tok, None)),
                 },
                 EvalValue::Value(val) => ExpValue::Value(val),
             };
@@ -371,6 +371,10 @@ pub fn create_arr<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
         new_tokens.push(tokens[i].clone());
     }
 
+    if new_tokens.len() == 0 {
+        return AstNodeType::Array(vec![]);
+    }
+
     match new_tokens[0].token_type {
         TokenType::LBracket => create_arr_with_tokens(new_tokens),
         TokenType::Number => create_arr_with_tokens(new_tokens),
@@ -382,6 +386,11 @@ pub fn create_arr<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
 }
 
 pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
+    match var_type {
+        VarType::Unknown => return true,
+        _ => {}
+    }
+
     match val {
         Value::Usize(_) => match var_type {
             VarType::Usize => true,
@@ -431,10 +440,10 @@ pub fn get_eval_value(vars: &mut Vec<VarValue>, val: EvalValue) -> Value {
     match val {
         EvalValue::Value(v) => v,
         EvalValue::Token(t) => match t.token_type {
-            TokenType::Number => value_from_token(vars, t, None),
-            TokenType::String => value_from_token(vars, t, None),
-            TokenType::Bool => value_from_token(vars, t, None),
-            TokenType::Identifier => value_from_token(vars, t, None),
+            TokenType::Number => value_from_token(vars, &t, None),
+            TokenType::String => value_from_token(vars, &t, None),
+            TokenType::Bool => value_from_token(vars, &t, None),
+            TokenType::Identifier => value_from_token(vars, &t, None),
             _ => panic!("Unexpected token: {}", t.value),
         },
     }
@@ -493,7 +502,11 @@ fn get_var_type_from_value(val: &Value) -> VarType {
 }
 
 pub fn get_array_type(values: &Vec<Value>) -> VarType {
-    get_var_type_from_value(&values[0])
+    if values.len() > 0 {
+        get_var_type_from_value(&values[0])
+    } else {
+        VarType::Unknown
+    }
 }
 
 pub fn create_cast_node<'a>(tokens: Vec<Token>) -> AstNodeType<'a> {
@@ -526,6 +539,7 @@ pub fn cast(to_type: VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert usize to array"),
+            VarType::Unknown => panic!("Cannot convert unknown"),
         },
         Value::String(v) => match to_type {
             VarType::Usize => {
@@ -542,6 +556,7 @@ pub fn cast(to_type: VarType, val: Value) -> Value {
             VarType::String => Value::String(v),
             VarType::Bool => Value::Bool(v.parse::<bool>().expect("Error parsing string to bool")),
             VarType::Array(_) => panic!("Cannot convert usize to array"),
+            VarType::Unknown => panic!("Cannot convert unknown"),
         },
         Value::Int(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -560,6 +575,7 @@ pub fn cast(to_type: VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert int to array"),
+            VarType::Unknown => panic!("Cannot convert unknown"),
         },
         Value::Float(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -578,6 +594,7 @@ pub fn cast(to_type: VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert float to array"),
+            VarType::Unknown => panic!("Cannot convert unknown"),
         },
         Value::Double(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -596,6 +613,7 @@ pub fn cast(to_type: VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert double to array"),
+            VarType::Unknown => panic!("Cannot convert unknown"),
         },
         Value::Long(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -614,6 +632,7 @@ pub fn cast(to_type: VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert long to array"),
+            VarType::Unknown => panic!("Cannot convert unknown"),
         },
         Value::Bool(v) => {
             let num_val = if v { 1 } else { 0 };
@@ -626,6 +645,7 @@ pub fn cast(to_type: VarType, val: Value) -> Value {
                 VarType::String => Value::String(v.to_string()),
                 VarType::Bool => val,
                 VarType::Array(_) => panic!("Cannot convert bool to array"),
+                VarType::Unknown => panic!("Cannot convert unknown"),
             }
         }
         Value::Array(arr) => match to_type {
@@ -637,6 +657,7 @@ pub fn cast(to_type: VarType, val: Value) -> Value {
             VarType::String => Value::String(get_value_arr_str(&arr)),
             VarType::Bool => panic!("Cannot convert array to bool"),
             VarType::Array(_) => unimplemented!(),
+            VarType::Unknown => panic!("Cannot convert unknown"),
         },
     }
 }

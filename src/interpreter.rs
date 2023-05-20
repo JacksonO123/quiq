@@ -45,6 +45,7 @@ pub enum VarType {
     String,
     Bool,
     Array(Box<VarType>),
+    Unknown,
 }
 impl VarType {
     pub fn from(string: &str) -> Self {
@@ -69,6 +70,7 @@ impl VarType {
             VarType::String => "string",
             VarType::Bool => "bool",
             VarType::Array(_) => "arr",
+            VarType::Unknown => "unknown",
         }
     }
 }
@@ -87,7 +89,7 @@ impl VarValue {
     }
 }
 
-fn get_var_value<'a>(vars: &mut Vec<VarValue>, name: String) -> Value {
+fn get_var_value<'a>(vars: &mut Vec<VarValue>, name: &'a str) -> Value {
     for var in vars.iter() {
         if var.name == name {
             return var.value.clone();
@@ -98,7 +100,7 @@ fn get_var_value<'a>(vars: &mut Vec<VarValue>, name: String) -> Value {
 
 pub fn value_from_token<'a>(
     vars: &mut Vec<VarValue>,
-    t: Token,
+    t: &Token,
     value_type: Option<VarType>,
 ) -> Value {
     match t.token_type {
@@ -137,12 +139,12 @@ pub fn value_from_token<'a>(
                 }
             }
         }
-        TokenType::String => Value::String(t.value.clone()),
+        TokenType::String => Value::String(t.value.to_string()),
         TokenType::Bool => {
             let val = t.value.parse::<bool>().unwrap();
             Value::Bool(val)
         }
-        TokenType::Identifier => get_var_value(vars, t.value),
+        TokenType::Identifier => get_var_value(vars, t.value.as_str()),
         _ => panic!("Cannot get value from token: {}", t.get_str()),
     }
 }
@@ -170,7 +172,7 @@ fn call_func<'a>(
                         let res = eval_node(vars, Rc::clone(&functions), scope, a);
                         if let Some(val) = res {
                             match val {
-                                EvalValue::Token(tok) => value_from_token(vars, tok, None),
+                                EvalValue::Token(tok) => value_from_token(vars, &tok, None),
                                 EvalValue::Value(v) => v,
                             }
                         } else {
@@ -393,7 +395,9 @@ pub fn eval_node<'a>(
             }
         }
         AstNodeType::AccessStructProp(struct_token, prop) => {
-            let value = value_from_token(vars, struct_token.clone(), None);
+            println!("access");
+
+            let value = value_from_token(vars, &struct_token, None);
 
             let res = match value {
                 Value::Array(mut vals) => match &prop
@@ -453,7 +457,7 @@ pub fn eval_node<'a>(
                         _ => panic!("Error in `if`, expected boolean"),
                     },
                     EvalValue::Token(tok) => {
-                        let tok_val = value_from_token(vars, tok, None);
+                        let tok_val = value_from_token(vars, &tok, None);
                         match tok_val {
                             Value::Bool(b) => b,
                             _ => panic!("Error in `if`, expected boolean"),
@@ -484,7 +488,7 @@ pub fn eval_node<'a>(
             let value = eval_node(vars, functions, scope, value.as_ref());
             if let Some(tok) = value {
                 let val = match tok {
-                    EvalValue::Token(t) => value_from_token(vars, t, Some(var_type)),
+                    EvalValue::Token(t) => value_from_token(vars, &t, Some(var_type)),
                     EvalValue::Value(v) => {
                         if ensure_type(&var_type, &v) {
                             v
@@ -512,10 +516,10 @@ pub fn eval_node<'a>(
             let value = eval_node(vars, functions, scope, value.as_ref());
             if let Some(tok) = value {
                 let val = match tok {
-                    EvalValue::Token(t) => value_from_token(vars, t, None),
+                    EvalValue::Token(t) => value_from_token(vars, &t, None),
                     EvalValue::Value(v) => v,
                 };
-                set_var_value(vars, name.value, val);
+                set_var_value(vars, name.value.as_str(), val);
             }
             None
         }
@@ -538,7 +542,7 @@ pub fn eval_node<'a>(
                         _ => panic!("Cannot ! non-boolean type"),
                     },
                     EvalValue::Token(t) => {
-                        let token_value = value_from_token(vars, t, None);
+                        let token_value = value_from_token(vars, &t, None);
                         match token_value {
                             Value::Bool(b) => b,
                             _ => panic!("Cannot ! non-boolean type"),

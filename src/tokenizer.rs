@@ -32,7 +32,6 @@ pub enum TokenType {
     Bang,
     Comma,
     Period,
-    Divider,
 }
 
 #[derive(Debug, Clone)]
@@ -41,15 +40,21 @@ pub struct Token {
     pub value: String,
 }
 impl Token {
-    pub fn new(value: String, token_type: TokenType) -> Self {
-        Self { token_type, value }
+    pub fn new_from_string(value: String, token_type: TokenType) -> Self {
+        Self { value, token_type }
+    }
+    pub fn new(value: &str, token_type: TokenType) -> Self {
+        Self {
+            value: String::from(value),
+            token_type,
+        }
     }
     pub fn get_str(&self) -> String {
         self.value.clone()
     }
 }
 
-fn get_full_token(chars: &Vec<char>, start: usize) -> String {
+fn get_full_token<'a>(chars: Vec<char>, start: usize) -> String {
     let mut res = String::new();
 
     let mut dot_found = false;
@@ -74,7 +79,7 @@ fn get_full_token(chars: &Vec<char>, start: usize) -> String {
     res
 }
 
-fn get_string_token(chars: &Vec<char>, start: usize) -> String {
+fn get_string_token<'a>(chars: Vec<char>, start: usize) -> String {
     let mut res = String::new();
     let mut i = start + 1;
     while i < chars.len() {
@@ -90,7 +95,7 @@ fn get_string_token(chars: &Vec<char>, start: usize) -> String {
     res
 }
 
-fn get_full_line(chars: &Vec<char>, start: usize) -> String {
+fn get_full_line<'a>(chars: Vec<char>, start: usize) -> String {
     let mut res = String::new();
     let mut i = start;
     while i < chars.len() {
@@ -116,7 +121,7 @@ pub fn tokenize(code: &str) -> Vec<Token> {
             || chars[i].is_numeric()
             || (i < chars.len() - 1 && chars[i] == '-' && chars[i + 1].is_numeric())
         {
-            let value = get_full_token(&chars, i);
+            let value = get_full_token(chars.clone(), i);
             i += value.len() - 1;
 
             let token_type = match value.as_str() {
@@ -148,61 +153,59 @@ pub fn tokenize(code: &str) -> Vec<Token> {
                     }
                 }
             };
-            token = Token::new(value, token_type);
+            token = Token::new_from_string(value, token_type);
         } else if chars[i] == '"' {
-            let string = get_string_token(&chars, i);
+            let string = get_string_token(chars.clone(), i);
             i += string.len();
 
-            token = Token::new(string, TokenType::String);
+            token = Token::new_from_string(string, TokenType::String);
         } else if i < chars.len() - 2 && chars[i] == '/' && chars[i + 1] == '/' {
-            let line = get_full_line(&chars, i);
+            let line = get_full_line(chars.clone(), i);
             i += line.len();
 
-            token = Token::new(line, TokenType::Comment);
+            token = Token::new_from_string(line, TokenType::Comment);
         } else if chars[i] == ' ' {
             i += 1;
             continue;
         } else if chars[i] == '\n' {
-            token = Token::new(String::from("\n"), TokenType::NewLine);
+            token = Token::new("\n", TokenType::NewLine);
         } else if chars[i] == '*' {
-            token = Token::new(String::from("*"), TokenType::Operator(OperatorType::Mult));
+            token = Token::new("*", TokenType::Operator(OperatorType::Mult));
         } else if chars[i] == '/' {
-            token = Token::new(String::from("/"), TokenType::Operator(OperatorType::Div));
+            token = Token::new("/", TokenType::Operator(OperatorType::Div));
         } else if chars[i] == '+' {
-            token = Token::new(String::from("+"), TokenType::Operator(OperatorType::Add));
+            token = Token::new("+", TokenType::Operator(OperatorType::Add));
         } else if chars[i] == '-' {
-            token = Token::new(String::from("-"), TokenType::Operator(OperatorType::Sub));
+            token = Token::new("-", TokenType::Operator(OperatorType::Sub));
         } else if chars[i] == '(' {
-            token = Token::new(String::from("("), TokenType::LParen);
+            token = Token::new("(", TokenType::LParen);
         } else if chars[i] == ')' {
-            token = Token::new(String::from(")"), TokenType::RParen);
+            token = Token::new(")", TokenType::RParen);
         } else if chars[i] == '{' {
-            token = Token::new(String::from("{"), TokenType::LBrace);
+            token = Token::new("{", TokenType::LBrace);
         } else if chars[i] == '}' {
-            token = Token::new(String::from("}"), TokenType::RBrace);
+            token = Token::new("}", TokenType::RBrace);
         } else if chars[i] == '[' {
-            token = Token::new(String::from("["), TokenType::LBracket);
+            token = Token::new("[", TokenType::LBracket);
         } else if chars[i] == ']' {
-            token = Token::new(String::from("]"), TokenType::RBracket);
+            token = Token::new("]", TokenType::RBracket);
         } else if chars[i] == ',' {
-            token = Token::new(String::from(","), TokenType::Comma);
+            token = Token::new(",", TokenType::Comma);
         } else if chars[i] == '.' {
-            token = Token::new(String::from(","), TokenType::Period);
+            token = Token::new(",", TokenType::Period);
         } else if chars[i] == ';' {
-            token = Token::new(String::from(";"), TokenType::Semicolon);
-        } else if chars[i] == '|' {
-            token = Token::new(String::from("|"), TokenType::Divider);
+            token = Token::new(";", TokenType::Semicolon);
         } else if chars[i] == '=' {
             if i < chars.len() - 1 && chars[i + 1] == '=' {
-                token = Token::new(String::from("=="), TokenType::EqCompare);
+                token = Token::new("==", TokenType::EqCompare);
             } else {
-                token = Token::new(String::from("="), TokenType::EqSet);
+                token = Token::new("=", TokenType::EqSet);
             }
         } else if chars[i] == '!' {
             if i < chars.len() - 1 && chars[i + 1] == '=' {
-                token = Token::new(String::from("!="), TokenType::EqNCompare);
+                token = Token::new("!=", TokenType::EqNCompare);
             } else {
-                token = Token::new(String::from("!"), TokenType::Bang);
+                token = Token::new("!", TokenType::Bang);
             }
         } else {
             panic!("Unexpected token: {}", chars[i]);
