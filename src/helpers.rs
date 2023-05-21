@@ -2,16 +2,20 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     ast::{get_ast_node, get_value_arr_str, AstNode, AstNodeType, Value},
-    interpreter::{eval_node, value_from_token, EvalValue, Func, VarType, VarValue},
-    tokenizer::{Token, TokenType},
+    interpreter::{eval_node, get_var_ptr, value_from_token, EvalValue, Func, VarType, VarValue},
+    tokenizer::Token,
 };
 
-pub fn create_make_var_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
-    let mut var_type = VarType::from(tokens[0].as_ref().unwrap().value.as_str());
+pub fn create_make_var_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
+    let mut var_type = if let Token::Type(t) = tokens[0].take().unwrap() {
+        t
+    } else {
+        panic!("Expected identifier for variable name");
+    };
 
     let mut i = 0;
-    while match tokens[i + 1].as_ref().unwrap().token_type {
-        TokenType::LBracket => true,
+    while match tokens[i + 1].as_ref().unwrap() {
+        Token::LBracket => true,
         _ => false,
     } {
         var_type = VarType::Array(Box::new(var_type));
@@ -21,9 +25,15 @@ pub fn create_make_var_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<
 
     let eq_pos = tokens
         .iter()
-        .position(|t| match t.as_ref().unwrap().token_type {
-            TokenType::EqSet => true,
-            _ => false,
+        .position(|t| {
+            if t.is_some() {
+                match t.as_ref().unwrap() {
+                    Token::EqSet => true,
+                    _ => false,
+                }
+            } else {
+                false
+            }
         })
         .unwrap();
 
@@ -41,7 +51,7 @@ pub fn create_make_var_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<
     )
 }
 
-pub fn create_set_var_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
+pub fn create_set_var_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
     let mut value_to_set = tokens_to_delimiter(tokens, 2, ";");
     let node = get_ast_node(&mut value_to_set);
     if node.is_none() {
@@ -50,8 +60,11 @@ pub fn create_set_var_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'
     AstNodeType::SetVar(tokens[0].take().unwrap(), Box::new(node.unwrap()))
 }
 
-pub fn create_keyword_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
-    match tokens[0].as_ref().unwrap().value.as_str() {
+pub fn create_keyword_node<'a>(
+    tokens: &mut Vec<Option<Token<'a>>>,
+    keyword: &str,
+) -> AstNodeType<'a> {
+    match keyword {
         "if" => {
             let mut condition = tokens_to_delimiter(tokens, 2, ")");
             let condition_len = condition.len();
@@ -74,11 +87,11 @@ pub fn create_keyword_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'
         "else" => unimplemented!(),
         "for" => unimplemented!(),
         "while" => unimplemented!(),
-        _ => panic!("Unexpected keyword: {}", tokens[0].as_ref().unwrap().value),
+        _ => panic!("Unexpected keyword: {:?}", tokens[0].as_ref().unwrap()),
     }
 }
 
-fn get_params<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<AstNode<'a>> {
+fn get_params<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<AstNode<'a>> {
     let mut arg_nodes: Vec<AstNode> = Vec::new();
     let mut temp_tokens: Vec<Option<Token>> = Vec::new();
     let mut i = 2;
@@ -86,11 +99,11 @@ fn get_params<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<AstNode<'a>> {
     let mut num_open_parens = 0;
 
     while i < tokens.len() {
-        match tokens[i].as_ref().unwrap().token_type {
-            TokenType::RParen => {
+        match tokens[i].as_ref().unwrap() {
+            Token::RParen => {
                 num_open_parens -= 1;
             }
-            TokenType::LParen => {
+            Token::LParen => {
                 num_open_parens += 1;
             }
             _ => {}
@@ -100,8 +113,8 @@ fn get_params<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<AstNode<'a>> {
             break;
         }
 
-        match tokens[i].as_ref().unwrap().token_type {
-            TokenType::Comma => {
+        match tokens[i].as_ref().unwrap() {
+            Token::Comma => {
                 let arg_node_option = get_ast_node(&mut temp_tokens);
                 if let Some(arg_node) = arg_node_option {
                     arg_nodes.push(arg_node);
@@ -134,17 +147,24 @@ fn get_params<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<AstNode<'a>> {
     arg_nodes
 }
 
-pub fn create_func_call_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
+pub fn create_func_call_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
     let params = get_params(tokens);
-    AstNodeType::CallFunc(tokens[0].as_ref().unwrap().value.clone(), params)
+
+    let func_name = if let Token::Identifier(ident) = tokens[0].take().unwrap() {
+        ident
+    } else {
+        panic!("Expected identifier for func name");
+    };
+
+    AstNodeType::CallFunc(func_name, params)
 }
 
 pub fn set_var_value<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    name: &'a str,
+    name: String,
     value: Value,
 ) {
-    let res_option = vars.get(name);
+    let res_option = vars.get(&name);
     if let Some(res) = res_option {
         let mut value_ref = res.borrow_mut();
         let var_value = &value_ref.value;
@@ -164,30 +184,31 @@ pub fn set_var_value<'a>(
 }
 
 pub fn tokens_to_delimiter<'a>(
-    tokens: &mut Vec<Option<Token>>,
+    tokens: &mut Vec<Option<Token<'a>>>,
     start: usize,
     delimiter: &'a str,
-) -> Vec<Option<Token>> {
+) -> Vec<Option<Token<'a>>> {
     let mut res = vec![];
 
     let mut open_brackets = 0;
     for i in start..tokens.len() {
-        if match tokens[i].as_ref().unwrap().token_type {
-            TokenType::LParen => true,
-            TokenType::LBrace => true,
-            TokenType::LBracket => true,
+        if match tokens[i].as_ref().unwrap() {
+            Token::LParen => true,
+            Token::LBrace => true,
+            Token::LBracket => true,
             _ => false,
         } {
             open_brackets += 1;
-        } else if match tokens[i].as_ref().unwrap().token_type {
-            TokenType::RParen => true,
-            TokenType::RBrace => true,
-            TokenType::RBracket => true,
+        } else if match tokens[i].as_ref().unwrap() {
+            Token::RParen => true,
+            Token::RBrace => true,
+            Token::RBracket => true,
             _ => false,
         } {
             open_brackets -= 1;
         }
-        if tokens[i].as_ref().unwrap().value != delimiter || open_brackets > 0 {
+
+        if tokens[i].as_ref().unwrap().get_str() != delimiter || open_brackets > 0 {
             res.push(Some(tokens[i].take().unwrap()));
         } else {
             return res;
@@ -197,28 +218,31 @@ pub fn tokens_to_delimiter<'a>(
     res
 }
 
-pub fn tokens_to_operator<'a>(tokens: &mut Vec<Option<Token>>, start: usize) -> Vec<Option<Token>> {
+pub fn tokens_to_operator<'a>(
+    tokens: &mut Vec<Option<Token<'a>>>,
+    start: usize,
+) -> Vec<Option<Token<'a>>> {
     let mut res = vec![];
 
     let mut open_brackets = 0;
     for i in start..tokens.len() {
-        if match tokens[i].as_ref().unwrap().token_type {
-            TokenType::LParen => true,
-            TokenType::LBrace => true,
-            TokenType::LBracket => true,
+        if match tokens[i].as_ref().unwrap() {
+            Token::LParen => true,
+            Token::LBrace => true,
+            Token::LBracket => true,
             _ => false,
         } {
             open_brackets += 1;
-        } else if match tokens[i].as_ref().unwrap().token_type {
-            TokenType::RParen => true,
-            TokenType::RBrace => true,
-            TokenType::RBracket => true,
+        } else if match tokens[i].as_ref().unwrap() {
+            Token::RParen => true,
+            Token::RBrace => true,
+            Token::RBracket => true,
             _ => false,
         } {
             open_brackets -= 1;
         }
-        if match tokens[i].as_ref().unwrap().token_type {
-            TokenType::Operator(_) => false,
+        if match tokens[i].as_ref().unwrap() {
+            Token::Operator(_) => false,
             _ => true,
         } || open_brackets > 0
         {
@@ -231,13 +255,13 @@ pub fn tokens_to_operator<'a>(tokens: &mut Vec<Option<Token>>, start: usize) -> 
     res
 }
 
-pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Box<AstNode<'a>>> {
+pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<Box<AstNode<'a>>> {
     let mut res: Vec<Box<AstNode>> = Vec::new();
 
     let mut i = 0;
     while i < tokens.len() {
-        match tokens[i].as_ref().unwrap().token_type {
-            TokenType::Operator(_) => {
+        match tokens[i].as_ref().unwrap() {
+            Token::Operator(_) => {
                 let node = AstNode::new(AstNodeType::Token(tokens[i].take().unwrap()));
                 res.push(Box::new(node));
                 i += 1;
@@ -247,10 +271,11 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Box<AstNode<'a>>
         }
 
         let mut to_op = tokens_to_operator(tokens, i);
+        println!("to op: {:?}", to_op);
 
         if to_op.len() > 0 {
-            if match to_op[0].as_ref().unwrap().token_type {
-                TokenType::LParen => true,
+            if match to_op[0].as_ref().unwrap() {
+                Token::LParen => true,
                 _ => false,
             } {
                 let slice = &to_op[1..to_op.len() - 1];
@@ -272,62 +297,53 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Box<AstNode<'a>>
 }
 
 pub fn is_exp(tokens: &mut Vec<Option<Token>>) -> bool {
-    let mut open_brackets = 0;
-    let mut res = true;
-    let mut op_found = false;
-
-    for token in tokens.iter() {
-        match token.as_ref().unwrap().token_type {
-            TokenType::Operator(_) => {
-                if open_brackets == 0 {
-                    op_found = true;
+    let mut i = 0;
+    while i < tokens.len() {
+        match tokens[i].as_ref().unwrap() {
+            Token::LParen => {
+                while i < tokens.len()
+                    && match tokens[i].as_ref().unwrap() {
+                        Token::RParen => false,
+                        _ => true,
+                    }
+                {
+                    i += 1;
                 }
             }
-            TokenType::RBrace => {
-                open_brackets -= 1;
+            Token::LBrace => {
+                while i < tokens.len()
+                    && match tokens[i].as_ref().unwrap() {
+                        Token::RBrace => false,
+                        _ => true,
+                    }
+                {
+                    i += 1;
+                }
             }
-            TokenType::RBracket => {
-                open_brackets -= 1;
+            Token::LBracket => {
+                while i < tokens.len()
+                    && match tokens[i].as_ref().unwrap() {
+                        Token::RBracket => false,
+                        _ => true,
+                    }
+                {
+                    i += 1;
+                }
             }
-            TokenType::RParen => {
-                open_brackets -= 1;
-            }
-            TokenType::LBrace => {
-                open_brackets += 1;
-            }
-            TokenType::LBracket => {
-                open_brackets += 1;
-            }
-            TokenType::LParen => {
-                open_brackets += 1;
-            }
-            TokenType::EqCompare => {
-                res = false;
-            }
-            TokenType::EqNCompare => {
-                res = false;
-            }
-            TokenType::EqSet => {
-                res = false;
-            }
-            TokenType::Bang => {
-                res = false;
-            }
-            TokenType::Identifier => {}
-            TokenType::Period => {}
+            Token::Operator(_) => return true,
             _ => {}
         }
-        if !res {
-            break;
-        }
+
+        i += 1;
     }
-    res && open_brackets == 0 && op_found
+
+    false
 }
 
 #[derive(Clone, Debug)]
-pub enum ExpValue {
+pub enum ExpValue<'a> {
     Value(Value),
-    Operator(TokenType),
+    Operator(Token<'a>),
 }
 
 pub fn flatten_exp<'a>(
@@ -335,15 +351,22 @@ pub fn flatten_exp<'a>(
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
     exp: &Vec<Box<AstNode<'a>>>,
-) -> Vec<Option<ExpValue>> {
+) -> Vec<Option<ExpValue<'a>>> {
     let mut res = vec![];
 
     for exp_node in exp.iter() {
         let tok_option = eval_node(vars, Rc::clone(&functions), scope, exp_node.as_ref());
         if let Some(tok) = tok_option {
             let val = match tok {
-                EvalValue::Token(tok) => match tok.token_type {
-                    TokenType::Operator(_) => ExpValue::Operator(tok.token_type),
+                EvalValue::Token(tok) => match tok {
+                    Token::Operator(_) => ExpValue::Operator(tok),
+                    Token::Identifier(ident) => {
+                        let var_ptr = get_var_ptr(vars, &ident);
+                        let var_ref = var_ptr.borrow();
+                        let var_value = var_ref.value.clone();
+
+                        ExpValue::Value(var_value)
+                    }
                     _ => ExpValue::Value(value_from_token(&tok, None)),
                 },
                 EvalValue::Value(val) => ExpValue::Value(val),
@@ -355,7 +378,7 @@ pub fn flatten_exp<'a>(
     res
 }
 
-pub fn create_bang_bool<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
+pub fn create_bang_bool<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
     tokens.remove(0);
 
     let ast_node = get_ast_node(tokens);
@@ -367,7 +390,7 @@ pub fn create_bang_bool<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> 
     }
 }
 
-fn create_arr_with_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
+fn create_arr_with_tokens<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
     let mut node_tokens = tokens_to_delimiter(tokens, 0, ",");
     let mut i = node_tokens.len() + 1;
 
@@ -389,7 +412,7 @@ fn create_arr_with_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a
     res
 }
 
-pub fn create_arr<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
+pub fn create_arr<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
     let mut new_tokens: Vec<Option<Token>> = Vec::new();
     for i in 1..tokens.len() - 1 {
         new_tokens.push(Some(tokens[i].take().unwrap()));
@@ -399,16 +422,13 @@ pub fn create_arr<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
         return AstNodeType::Array(vec![]);
     }
 
-    match new_tokens[0].as_ref().unwrap().token_type {
-        TokenType::LBracket => create_arr_with_tokens(&mut new_tokens),
-        TokenType::Number => create_arr_with_tokens(&mut new_tokens),
-        TokenType::String => create_arr_with_tokens(&mut new_tokens),
-        TokenType::Bool => create_arr_with_tokens(&mut new_tokens),
-        TokenType::Identifier => create_arr_with_tokens(&mut new_tokens),
-        _ => panic!(
-            "Unexpected token: {}",
-            new_tokens[0].as_ref().unwrap().value
-        ),
+    match new_tokens[0].as_ref().unwrap() {
+        Token::LBracket => create_arr_with_tokens(&mut new_tokens),
+        Token::Number(_) => create_arr_with_tokens(&mut new_tokens),
+        Token::String(_) => create_arr_with_tokens(&mut new_tokens),
+        Token::Bool(_) => create_arr_with_tokens(&mut new_tokens),
+        Token::Identifier(_) => create_arr_with_tokens(&mut new_tokens),
+        _ => panic!("Unexpected token: {:?}", new_tokens[0]),
     }
 }
 
@@ -466,12 +486,12 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
 pub fn get_eval_value(val: EvalValue) -> Value {
     match val {
         EvalValue::Value(v) => v,
-        EvalValue::Token(t) => match t.token_type {
-            TokenType::Number => value_from_token(&t, None),
-            TokenType::String => value_from_token(&t, None),
-            TokenType::Bool => value_from_token(&t, None),
-            TokenType::Identifier => value_from_token(&t, None),
-            _ => panic!("Unexpected token: {}", t.value),
+        EvalValue::Token(t) => match t {
+            Token::Number(_) => value_from_token(&t, None),
+            Token::String(_) => value_from_token(&t, None),
+            Token::Bool(_) => value_from_token(&t, None),
+            Token::Identifier(_) => value_from_token(&t, None),
+            _ => panic!("Unexpected token: {:?}", t),
         },
     }
 }
@@ -523,15 +543,17 @@ pub fn get_array_type(values: &Vec<Value>) -> VarType {
     }
 }
 
-pub fn create_cast_node<'a>(tokens: &mut Vec<Option<Token>>) -> AstNodeType<'a> {
+pub fn create_cast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
     let mut node_tokens = tokens_to_delimiter(tokens, 2, ")");
     let node_option = get_ast_node(&mut node_tokens);
 
+    let to_type = match tokens[0].as_ref().unwrap() {
+        Token::Type(t) => t.get_str(),
+        _ => panic!("Cannot cast to: {:?}", tokens[0].as_ref().unwrap()),
+    };
+
     if let Some(node) = node_option {
-        AstNodeType::Cast(
-            VarType::from(tokens[0].as_ref().unwrap().value.as_str()),
-            Box::new(node),
-        )
+        AstNodeType::Cast(VarType::from(to_type), Box::new(node))
     } else {
         panic!("")
     }
@@ -679,44 +701,46 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
     }
 }
 
-pub fn get_struct_access_tokens(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<Option<Token>>> {
+pub fn get_struct_access_tokens<'a>(
+    tokens: &mut Vec<Option<Token<'a>>>,
+) -> Vec<Vec<Option<Token<'a>>>> {
     let mut res = vec![vec![]];
     let mut i = 0;
 
     let mut open_brackets = 0;
     while i < tokens.len() {
-        if match tokens[i].as_ref().unwrap().token_type {
-            TokenType::LParen => true,
-            TokenType::LBrace => true,
-            TokenType::LBracket => true,
+        if match tokens[i].as_ref().unwrap() {
+            Token::LParen => true,
+            Token::LBrace => true,
+            Token::LBracket => true,
             _ => false,
         } {
             open_brackets += 1;
-        } else if match tokens[i].as_ref().unwrap().token_type {
-            TokenType::RParen => true,
-            TokenType::RBrace => true,
-            TokenType::RBracket => true,
+        } else if match tokens[i].as_ref().unwrap() {
+            Token::RParen => true,
+            Token::RBrace => true,
+            Token::RBracket => true,
             _ => false,
         } {
             open_brackets -= 1;
         }
 
         if open_brackets == 0
-            && match tokens[i].as_ref().unwrap().token_type {
-                TokenType::Period => {
+            && match tokens[i].as_ref().unwrap() {
+                Token::Period => {
                     res.push(vec![]);
                     false
                 }
-                TokenType::Identifier => false,
-                TokenType::LParen => false,
+                Token::Identifier(_) => false,
+                Token::LParen => false,
                 _ => true,
             }
         {
             let index = res.len() - 1;
             res[index].push(Some(tokens[i].take().unwrap()));
             if i + 1 < tokens.len()
-                && match tokens[i + 1].as_ref().unwrap().token_type {
-                    TokenType::Semicolon => true,
+                && match tokens[i + 1].as_ref().unwrap() {
+                    Token::Semicolon => true,
                     _ => false,
                 }
             {
@@ -739,26 +763,26 @@ pub fn is_sequence(tokens: &mut Vec<Option<Token>>) -> bool {
     let mut semicolons = 0;
 
     for i in 0..tokens.len() {
-        match tokens[i].as_ref().unwrap().token_type {
-            TokenType::LParen => {
+        match tokens[i].as_ref().unwrap() {
+            Token::LParen => {
                 open_brackets += 1;
             }
-            TokenType::RParen => {
+            Token::RParen => {
                 open_brackets -= 1;
             }
-            TokenType::LBrace => {
+            Token::LBrace => {
                 open_brackets += 1;
             }
-            TokenType::RBrace => {
+            Token::RBrace => {
                 open_brackets -= 1;
             }
-            TokenType::LBracket => {
+            Token::LBracket => {
                 open_brackets += 1;
             }
-            TokenType::RBracket => {
+            Token::RBracket => {
                 open_brackets -= 1;
             }
-            TokenType::Semicolon => {
+            Token::Semicolon => {
                 if i < tokens.len() - 1 && open_brackets == 0 {
                     semicolons += 1;
                 }

@@ -2,7 +2,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     interpreter::{get_var_ptr, value_from_token, BuiltinFunc, EvalValue, Func, VarValue},
-    tokenizer::TokenType,
+    tokenizer::Token,
 };
 
 pub fn init_builtins(
@@ -15,9 +15,9 @@ pub fn init_builtins(
             for (i, param) in params.iter().enumerate() {
                 let to_print = match param {
                     EvalValue::Value(val) => val.get_str(),
-                    EvalValue::Token(tok) => match tok.token_type {
-                        TokenType::Identifier => {
-                            let var_ptr = get_var_ptr(vars, &tok.value);
+                    EvalValue::Token(tok) => match tok {
+                        Token::Identifier(ident) => {
+                            let var_ptr = get_var_ptr(vars, &ident);
                             let var_value = &var_ptr.borrow().value;
                             var_value.get_str()
                         }

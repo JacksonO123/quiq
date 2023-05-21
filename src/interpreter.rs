@@ -6,7 +6,7 @@ use crate::{
         cast, ensure_type, flatten_exp, get_array_type, get_eval_value, push_to_array,
         set_var_value, ExpValue,
     },
-    tokenizer::{OperatorType, Token, TokenType},
+    tokenizer::{OperatorType, Token},
 };
 
 pub struct CustomFunc<'a> {
@@ -104,51 +104,48 @@ pub fn get_var_ptr<'a>(
 }
 
 pub fn value_from_token<'a>(t: &Token, value_type: Option<&VarType>) -> Value {
-    match t.token_type {
-        TokenType::Number => {
+    match t {
+        Token::Number(n) => {
             if let Some(vt) = value_type {
                 match vt {
                     VarType::Int => {
-                        let num = t.value.parse::<i32>().unwrap();
+                        let num = n.parse::<i32>().unwrap();
                         Value::Int(num)
                     }
                     VarType::Float => {
-                        let num = t.value.parse::<f32>().unwrap();
+                        let num = n.parse::<f32>().unwrap();
                         Value::Float(num)
                     }
                     VarType::Double => {
-                        let num = t.value.parse::<f64>().unwrap();
+                        let num = n.parse::<f64>().unwrap();
                         Value::Double(num)
                     }
                     VarType::Usize => {
-                        let num = t.value.parse::<usize>().unwrap();
+                        let num = n.parse::<usize>().unwrap();
                         Value::Usize(num)
                     }
                     VarType::Long => {
-                        let num = t.value.parse::<i64>().unwrap();
+                        let num = n.parse::<i64>().unwrap();
                         Value::Long(num)
                     }
                     _ => panic!("Unexpected type token"),
                 }
             } else {
-                if t.value.contains('.') {
-                    let num = t.value.parse::<f64>().unwrap();
+                if n.contains('.') {
+                    let num = n.parse::<f64>().unwrap();
                     Value::Double(num)
                 } else {
-                    let num = t.value.parse::<i32>().unwrap();
+                    let num = n.parse::<i32>().unwrap();
                     Value::Int(num)
                 }
             }
         }
-        TokenType::String => Value::String(t.value.to_string()),
-        TokenType::Bool => {
-            let val = t.value.parse::<bool>().unwrap();
-            Value::Bool(val)
-        }
-        TokenType::Identifier => {
+        Token::String(s) => Value::String(s.to_string()),
+        Token::Bool(b) => Value::Bool(*b),
+        Token::Identifier(_) => {
             panic!("Cannot get token value of identifier");
         }
-        _ => panic!("Cannot get value from token: {}", t.value),
+        _ => panic!("Cannot get value from token: {:?}", t),
     }
 }
 
@@ -158,7 +155,7 @@ fn call_func<'a>(
     scope: usize,
     name: &String,
     args: &Vec<AstNode<'a>>,
-) -> Option<Token> {
+) -> Option<Token<'a>> {
     let mut found = false;
     for func in functions.borrow().iter() {
         match func {
@@ -194,9 +191,9 @@ fn call_func<'a>(
 }
 
 #[derive(Debug, Clone)]
-pub enum EvalValue {
+pub enum EvalValue<'a> {
     Value(Value),
-    Token(Token),
+    Token(Token<'a>),
 }
 
 pub fn eval_exp<'a>(
@@ -204,10 +201,8 @@ pub fn eval_exp<'a>(
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
     exp: &Vec<Box<AstNode<'a>>>,
-) -> EvalValue {
+) -> EvalValue<'a> {
     let mut flattened = flatten_exp(vars, functions, scope, exp);
-
-    // TODO: possibly add exponents
 
     let pemdas_operations: [OperatorType; 4] = [
         OperatorType::Mult,
@@ -222,7 +217,7 @@ pub fn eval_exp<'a>(
             match &flattened[i].as_ref().unwrap() {
                 ExpValue::Operator(tok) => {
                     match tok {
-                        TokenType::Operator(op_type) => {
+                        Token::Operator(op_type) => {
                             let left = &flattened[i - 1];
                             let right = &flattened[i + 1];
 
@@ -381,7 +376,7 @@ pub fn eval_node<'a>(
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
     node: &AstNode<'a>,
-) -> Option<EvalValue> {
+) -> Option<EvalValue<'a>> {
     match &node.node_type {
         AstNodeType::Cast(var_type, node) => {
             let res_option = eval_node(vars, Rc::clone(&functions), scope, node.as_ref());
@@ -395,7 +390,11 @@ pub fn eval_node<'a>(
             }
         }
         AstNodeType::AccessStructProp(struct_token, prop) => {
-            let var_ptr = get_var_ptr(vars, &struct_token.value);
+            let var_ptr = if let Token::Identifier(ident) = struct_token {
+                get_var_ptr(vars, &ident)
+            } else {
+                panic!("Error in struct property access, expected identifier");
+            };
 
             let mut var_ref = var_ptr.borrow_mut();
             let var_value = &mut var_ref.value;
@@ -413,12 +412,12 @@ pub fn eval_node<'a>(
                         }
                         _ => panic!("Unknown array method: {}", name),
                     },
-                    AstNodeType::Token(t) => match t.token_type {
-                        TokenType::Identifier => match t.value.as_str() {
+                    AstNodeType::Token(t) => match t {
+                        Token::Identifier(ident) => match ident.as_str() {
                             "length" => Some(EvalValue::Value(Value::Usize(vals.len()))),
                             _ => unimplemented!(),
                         },
-                        _ => panic!("Unexpected method: {}", t.value),
+                        _ => panic!("Unexpected method: {:?}", t),
                     },
                     _ => panic!("Unexpected operation: {:?}", prop),
                 },
@@ -448,9 +447,9 @@ pub fn eval_node<'a>(
                         Value::Bool(b) => b,
                         _ => panic!("Error in `if`, expected boolean"),
                     },
-                    EvalValue::Token(tok) => match tok.token_type {
-                        TokenType::Identifier => {
-                            let var_ptr = get_var_ptr(vars, &tok.value);
+                    EvalValue::Token(tok) => match tok {
+                        Token::Identifier(ident) => {
+                            let var_ptr = get_var_ptr(vars, &ident);
                             let val_ref = var_ptr.borrow();
                             let val = &val_ref.value;
                             match val {
@@ -508,8 +507,15 @@ pub fn eval_node<'a>(
                         }
                     }
                 };
-                let var = Rc::new(RefCell::new(VarValue::new(name.value.clone(), val, scope)));
-                vars.insert(name.value.clone(), var);
+
+                let var_name = if let Token::Identifier(ident) = name {
+                    ident
+                } else {
+                    panic!("Expected identifier for variable name");
+                };
+
+                let var = Rc::new(RefCell::new(VarValue::new(var_name.clone(), val, scope)));
+                vars.insert(var_name.clone(), var);
             } else {
                 panic!("Expected {} found void", var_type.get_str());
             }
@@ -522,7 +528,14 @@ pub fn eval_node<'a>(
                     EvalValue::Token(t) => value_from_token(&t, None),
                     EvalValue::Value(v) => v,
                 };
-                set_var_value(vars, name.value.as_str(), val);
+
+                let var_name = if let Token::Identifier(ident) = name {
+                    ident.clone()
+                } else {
+                    panic!("Expected identifier for setting variable");
+                };
+
+                set_var_value(vars, var_name, val);
             }
             None
         }

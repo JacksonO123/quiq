@@ -1,3 +1,2 @@
-bool[] v = [];
-v.push(true);
-print(v);
+int v = 1;
+print(v + 10);

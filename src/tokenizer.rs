@@ -7,14 +7,25 @@ pub enum OperatorType {
     Mult,
     Div,
 }
+impl OperatorType {
+    pub fn get_str(&self) -> &str {
+        match self {
+            OperatorType::Add => "+",
+            OperatorType::Sub => "-",
+            OperatorType::Mult => "*",
+            OperatorType::Div => "/",
+        }
+    }
+}
 
 #[derive(Debug, Clone)]
-pub enum TokenType {
+pub enum Token<'a> {
     Type(VarType),
-    Number,
-    String,
-    Bool,
-    Keyword,
+    Number(String),
+    String(String),
+    Bool(bool),
+    Keyword(&'a str),
+    Identifier(String),
     Operator(OperatorType),
     RParen,
     LParen,
@@ -25,28 +36,52 @@ pub enum TokenType {
     EqCompare,
     EqNCompare,
     EqSet,
-    Identifier,
     Semicolon,
     NewLine,
     Comment,
     Bang,
     Comma,
     Period,
+    LAngle,
+    RAngle,
+    LAngleEq,
+    RAngleEq,
 }
-
-#[derive(Debug, Clone)]
-pub struct Token {
-    pub token_type: TokenType,
-    pub value: String,
-}
-impl Token {
-    pub fn new_from_string(value: String, token_type: TokenType) -> Self {
-        Self { value, token_type }
-    }
-    pub fn new(value: &str, token_type: TokenType) -> Self {
-        Self {
-            value: String::from(value),
-            token_type,
+impl<'a> Token<'a> {
+    pub fn get_str(&self) -> &str {
+        match self {
+            Token::Type(var_type) => &var_type.get_str(),
+            Token::Number(n) => n,
+            Token::String(s) => s,
+            Token::Bool(b) => {
+                if *b {
+                    "true"
+                } else {
+                    "false"
+                }
+            }
+            Token::Keyword(k) => k,
+            Token::Identifier(ident) => ident,
+            Token::Operator(op_type) => op_type.get_str(),
+            Token::RParen => ")",
+            Token::LParen => "(",
+            Token::RBrace => "}",
+            Token::LBrace => "{",
+            Token::RBracket => "]",
+            Token::LBracket => "[",
+            Token::EqCompare => "==",
+            Token::EqNCompare => "!=",
+            Token::EqSet => "=",
+            Token::Semicolon => ";",
+            Token::NewLine => "\n",
+            Token::Comment => panic!("Cannot get str of comment"),
+            Token::Bang => "!",
+            Token::Comma => ",",
+            Token::Period => ".",
+            Token::LAngle => "<",
+            Token::RAngle => ">",
+            Token::LAngleEq => "<=",
+            Token::RAngleEq => ">=",
         }
     }
 }
@@ -122,95 +157,106 @@ pub fn tokenize(code: &str) -> Vec<Option<Token>> {
 
             i += value.len() - 1;
 
-            let token_type = match value.as_str() {
+            token = match value.as_str() {
                 // types
-                "int" => TokenType::Type(VarType::Int),
-                "float" => TokenType::Type(VarType::Float),
-                "double" => TokenType::Type(VarType::Double),
-                "long" => TokenType::Type(VarType::Long),
-                "bool" => TokenType::Type(VarType::Bool),
-                "string" => TokenType::Type(VarType::String),
-                "usize" => TokenType::Type(VarType::Usize),
+                "int" => Token::Type(VarType::Int),
+                "float" => Token::Type(VarType::Float),
+                "double" => Token::Type(VarType::Double),
+                "long" => Token::Type(VarType::Long),
+                "bool" => Token::Type(VarType::Bool),
+                "string" => Token::Type(VarType::String),
+                "usize" => Token::Type(VarType::Usize),
                 // keywords (add more)
-                "if" => TokenType::Keyword,
-                "else" => TokenType::Keyword,
-                "for" => TokenType::Keyword,
-                "while" => TokenType::Keyword,
+                "if" => Token::Keyword("if"),
+                "else" => Token::Keyword("else"),
+                "for" => Token::Keyword("for"),
+                "while" => Token::Keyword("while"),
                 // booleans
-                "true" => TokenType::Bool,
-                "false" => TokenType::Bool,
+                "true" => Token::Bool(true),
+                "false" => Token::Bool(false),
                 _ => {
                     let chars: Vec<char> = value.chars().collect();
                     // check string, check number
                     if is_number(&value) {
-                        TokenType::Number
+                        Token::Number(value)
                     } else if chars[0].is_alphabetic() {
-                        TokenType::Identifier
+                        Token::Identifier(value)
                     } else {
                         panic!("Unknown token: {}", value)
                     }
                 }
             };
-            token = Token::new_from_string(value, token_type);
         } else if chars[i] == '"' {
             let string = get_string_token(&chars, i);
             i += string.len() + 1;
 
-            token = Token::new_from_string(string, TokenType::String);
+            token = Token::String(string);
         } else if i < chars.len() - 2 && chars[i] == '/' && chars[i + 1] == '/' {
             let line = get_full_line(&chars, i);
             i += line.len();
 
-            token = Token::new_from_string(line, TokenType::Comment);
+            token = Token::Comment;
         } else if chars[i] == ' ' {
             i += 1;
             continue;
         } else if chars[i] == '\n' {
-            token = Token::new("\n", TokenType::NewLine);
+            token = Token::NewLine;
         } else if chars[i] == '*' {
-            token = Token::new("*", TokenType::Operator(OperatorType::Mult));
+            token = Token::Operator(OperatorType::Mult);
         } else if chars[i] == '/' {
-            token = Token::new("/", TokenType::Operator(OperatorType::Div));
+            token = Token::Operator(OperatorType::Div);
         } else if chars[i] == '+' {
-            token = Token::new("+", TokenType::Operator(OperatorType::Add));
+            token = Token::Operator(OperatorType::Add);
         } else if chars[i] == '-' {
-            token = Token::new("-", TokenType::Operator(OperatorType::Sub));
+            token = Token::Operator(OperatorType::Sub);
         } else if chars[i] == '(' {
-            token = Token::new("(", TokenType::LParen);
+            token = Token::LParen;
         } else if chars[i] == ')' {
-            token = Token::new(")", TokenType::RParen);
+            token = Token::RParen;
         } else if chars[i] == '{' {
-            token = Token::new("{", TokenType::LBrace);
+            token = Token::LBrace;
         } else if chars[i] == '}' {
-            token = Token::new("}", TokenType::RBrace);
+            token = Token::RBrace;
         } else if chars[i] == '[' {
-            token = Token::new("[", TokenType::LBracket);
+            token = Token::LBracket;
         } else if chars[i] == ']' {
-            token = Token::new("]", TokenType::RBracket);
-        } else if chars[i] == ',' {
-            token = Token::new(",", TokenType::Comma);
-        } else if chars[i] == '.' {
-            token = Token::new(".", TokenType::Period);
-        } else if chars[i] == ';' {
-            token = Token::new(";", TokenType::Semicolon);
-        } else if chars[i] == '=' {
-            if i < chars.len() - 1 && chars[i + 1] == '=' {
-                token = Token::new("==", TokenType::EqCompare);
+            token = Token::RBracket;
+        } else if chars[i] == '<' {
+            token = if i < chars.len() - 1 && chars[i + 1] == '=' {
+                Token::LAngleEq
             } else {
-                token = Token::new("=", TokenType::EqSet);
+                Token::LAngle
+            }
+        } else if chars[i] == '>' {
+            token = if i < chars.len() - 1 && chars[i + 1] == '=' {
+                Token::RAngleEq
+            } else {
+                Token::RAngle
+            }
+        } else if chars[i] == ',' {
+            token = Token::Comma;
+        } else if chars[i] == '.' {
+            token = Token::Period;
+        } else if chars[i] == ';' {
+            token = Token::Semicolon;
+        } else if chars[i] == '=' {
+            token = if i < chars.len() - 1 && chars[i + 1] == '=' {
+                Token::EqCompare
+            } else {
+                Token::EqSet
             }
         } else if chars[i] == '!' {
-            if i < chars.len() - 1 && chars[i + 1] == '=' {
-                token = Token::new("!=", TokenType::EqNCompare);
+            token = if i < chars.len() - 1 && chars[i + 1] == '=' {
+                Token::EqNCompare
             } else {
-                token = Token::new("!", TokenType::Bang);
+                Token::Bang
             }
         } else {
             panic!("Unexpected token: {}", chars[i]);
         }
 
-        match token.token_type {
-            TokenType::Comment => {}
+        match token {
+            Token::Comment => {}
             _ => {
                 tokens.push(Some(token));
             }
