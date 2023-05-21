@@ -1,1 +1,5 @@
-print(1 + 2 * 3);
+int v = 3;
+int[] arr = [];
+arr.push(v);
+v = 4;
+print(arr);

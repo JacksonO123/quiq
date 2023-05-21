@@ -483,14 +483,18 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
     }
 }
 
-pub fn get_eval_value(val: EvalValue) -> Value {
+pub fn get_eval_value(vars: &mut HashMap<String, Rc<RefCell<VarValue>>>, val: EvalValue) -> Value {
     match val {
         EvalValue::Value(v) => v,
         EvalValue::Token(t) => match t {
             Token::Number(_) => value_from_token(&t, None),
             Token::String(_) => value_from_token(&t, None),
             Token::Bool(_) => value_from_token(&t, None),
-            Token::Identifier(_) => value_from_token(&t, None),
+            Token::Identifier(ident) => {
+                let var_ptr = get_var_ptr(vars, &ident);
+                let var_ref = var_ptr.borrow();
+                var_ref.value.clone()
+            }
             _ => panic!("Unexpected token: {:?}", t),
         },
     }
@@ -509,7 +513,7 @@ pub fn push_to_array<'a>(
         let arg_res_option = eval_node(vars, Rc::clone(&functions), scope, arg);
 
         if let Some(arg_res) = arg_res_option {
-            let val = get_eval_value(arg_res);
+            let val = get_eval_value(vars, arg_res);
             if !ensure_type(&arr_item_type, &val) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",

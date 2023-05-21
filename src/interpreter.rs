@@ -382,7 +382,7 @@ pub fn eval_node<'a>(
             let res_option = eval_node(vars, Rc::clone(&functions), scope, node.as_ref());
 
             if let Some(eval_value) = res_option {
-                let val = get_eval_value(eval_value);
+                let val = get_eval_value(vars, eval_value);
                 let casted_value = cast(var_type, val);
                 Some(EvalValue::Value(casted_value))
             } else {
@@ -433,7 +433,7 @@ pub fn eval_node<'a>(
                 let res_option = eval_node(vars, Rc::clone(&functions), scope, node);
 
                 if let Some(res) = res_option {
-                    let val = get_eval_value(res);
+                    let val = get_eval_value(vars, res);
                     res_arr.push(val);
                 }
             }
