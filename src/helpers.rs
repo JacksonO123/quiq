@@ -859,24 +859,8 @@ pub fn create_comp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNo
     None
 }
 
-macro_rules! eval_val_macro {
-    ($v:ident, $x:ident) => {
-        match $x {
-            EvalValue::Value(val) => val,
-            EvalValue::Token(t) => match t {
-                Token::Identifier(ident) => {
-                    let var_ptr = get_var_ptr($v, &ident);
-                    let var_ref = var_ptr.borrow();
-                    var_ref.value.clone() // TODO: try to get rid of this
-                }
-                _ => value_from_token(&t, None),
-            },
-        }
-    };
-}
-
 macro_rules! comp {
-    ($l:ident, $r:ident, $c:tt) => {
+    ($l:expr, $r:expr, $c:tt) => {
         match $l {
             Value::Usize(l) => match $r {
                 Value::Usize(r) => l $c r,
@@ -962,25 +946,90 @@ macro_rules! comp {
     };
 }
 
+macro_rules! comp_match {
+    ($tok:ident, $left:expr, $right:expr) => {
+        match $tok {
+            Token::EqCompare => comp!($left, $right, ==),
+            Token::EqNCompare => comp!($left, $right, !=),
+            Token::LAngle => comp!($left, $right, <),
+            Token::RAngle => comp!($left, $right, >),
+            Token::LAngleEq => comp!($left, $right, <=),
+            Token::RAngleEq => comp!($left, $right, >=),
+            _ => panic!("Expected comparison operator"),
+        }
+    }
+}
+
 pub fn compare<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     left: EvalValue,
     right: EvalValue,
     comp_token: &Token,
 ) -> EvalValue<'a> {
-    let left_val = eval_val_macro!(vars, left);
+    let res = match left {
+        EvalValue::Value(left_val) => match right {
+            EvalValue::Value(right_val) => {
+                comp_match!(comp_token, left_val, right_val)
+            }
+            EvalValue::Token(t) => match t {
+                Token::Identifier(ident) => {
+                    let var_ptr = get_var_ptr(vars, &ident);
+                    let var_ref = var_ptr.borrow();
+                    let right_val = &var_ref.value;
+                    comp_match!(comp_token, &left_val, right_val)
+                }
+                _ => {
+                    let right_val = value_from_token(&t, None);
+                    comp_match!(comp_token, left_val, right_val)
+                }
+            },
+        },
+        EvalValue::Token(t) => match t {
+            Token::Identifier(ident) => {
+                let var_ptr = get_var_ptr(vars, &ident);
+                let var_ref = var_ptr.borrow();
+                let left_val = &var_ref.value;
+                match right {
+                    EvalValue::Value(right_val) => {
+                        comp_match!(comp_token, left_val, &right_val)
+                    }
+                    EvalValue::Token(t) => match t {
+                        Token::Identifier(ident) => {
+                            let var_ptr = get_var_ptr(vars, &ident);
+                            let var_ref = var_ptr.borrow();
+                            let right_val = &var_ref.value;
+                            comp_match!(comp_token, &left_val, right_val)
+                        }
+                        _ => {
+                            let right_val = value_from_token(&t, None);
+                            comp_match!(comp_token, left_val, &right_val)
+                        }
+                    },
+                }
+            }
+            _ => {
+                let left_val = value_from_token(&t, None);
 
-    let right_val = eval_val_macro!(vars, right);
-
-    let bool_res = match comp_token {
-        Token::EqCompare => comp!(left_val, right_val, ==),
-        Token::EqNCompare => comp!(left_val, right_val, !=),
-        Token::LAngle => comp!(left_val, right_val, <),
-        Token::RAngle => comp!(left_val, right_val, >),
-        Token::LAngleEq => comp!(left_val, right_val, <=),
-        Token::RAngleEq => comp!(left_val, right_val, >=),
-        _ => panic!("Expected comparison operator"),
+                match right {
+                    EvalValue::Value(right_val) => {
+                        comp_match!(comp_token, left_val, right_val)
+                    }
+                    EvalValue::Token(t) => match t {
+                        Token::Identifier(ident) => {
+                            let var_ptr = get_var_ptr(vars, &ident);
+                            let var_ref = var_ptr.borrow();
+                            let right_val = &var_ref.value;
+                            comp_match!(comp_token, &left_val, right_val)
+                        }
+                        _ => {
+                            let right_val = value_from_token(&t, None);
+                            comp_match!(comp_token, left_val, right_val)
+                        }
+                    },
+                }
+            }
+        },
     };
 
-    EvalValue::Value(Value::Bool(bool_res))
+    EvalValue::Value(Value::Bool(res))
 }

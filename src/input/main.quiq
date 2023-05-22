@@ -1,2 +1,1 @@
-int v = 1;
-print("test" != "testb");
+print(1 < 2);
