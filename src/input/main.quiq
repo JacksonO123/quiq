@@ -1,2 +1,2 @@
 int v = 1;
-print(v + 10);
+print("test" != "testb");

@@ -299,6 +299,11 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<Box<AstNode<
 pub fn is_exp(tokens: &mut Vec<Option<Token>>) -> bool {
     let mut i = 0;
     while i < tokens.len() {
+        if tokens[i].is_none() {
+            i += 1;
+            continue;
+        }
+
         match tokens[i].as_ref().unwrap() {
             Token::LParen => {
                 while i < tokens.len()
@@ -469,14 +474,11 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
         },
         Value::Array(arr) => match var_type {
             VarType::Array(arr_type) => {
-                let mut res = true;
-                for item in arr.iter() {
-                    if !ensure_type(arr_type.as_ref(), item) {
-                        res = false;
-                        break;
-                    }
+                if arr.len() == 0 {
+                    return true;
                 }
-                res
+
+                ensure_type(arr_type.as_ref(), &arr[0])
             }
             _ => false,
         },
@@ -798,4 +800,187 @@ pub fn is_sequence(tokens: &mut Vec<Option<Token>>) -> bool {
     // <= 1 because sequences with 1 semicolon can be
     // seen as single lines
     open_brackets == 0 && semicolons > 0
+}
+
+pub fn create_comp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNodeType<'a>> {
+    // TODO
+    // check for cases like this: if ((i < 10)) { ... }
+    // should be treated like: if (i < 10) { ... }
+    let mut temp_tokens = vec![];
+    let mut open_parens = 0;
+
+    for i in 0..tokens.len() {
+        match tokens[i].as_ref().unwrap() {
+            Token::LParen => open_parens += 1,
+            Token::RParen => open_parens -= 1,
+            Token::LBracket => open_parens += 1,
+            Token::RBracket => open_parens -= 1,
+            Token::LBrace => open_parens += 1,
+            Token::RBrace => open_parens -= 1,
+            _ => {}
+        }
+
+        if match tokens[i].as_ref().unwrap() {
+            Token::EqCompare => true,
+            Token::EqNCompare => true,
+            Token::LAngle => true,
+            Token::RAngle => true,
+            Token::LAngleEq => true,
+            Token::RAngleEq => true,
+            _ => false,
+        } && open_parens == 0
+        {
+            for j in 0..i {
+                temp_tokens.push(Some(tokens[j].take().unwrap()));
+            }
+
+            if let Some(left_node) = get_ast_node(&mut temp_tokens) {
+                temp_tokens.drain(0..temp_tokens.len());
+
+                for j in i + 1..tokens.len() {
+                    temp_tokens.push(Some(tokens[j].take().unwrap()));
+                }
+
+                if let Some(right_node) = get_ast_node(&mut temp_tokens) {
+                    return Some(AstNodeType::Comparison(
+                        tokens[i].take().unwrap(),
+                        Box::new(left_node),
+                        Box::new(right_node),
+                    ));
+                } else {
+                    panic!("Expected expression to right of comparison operator");
+                }
+            } else {
+                panic!("Expected expression to left of comparison operator");
+            }
+        }
+    }
+
+    None
+}
+
+macro_rules! eval_val_macro {
+    ($v:ident, $x:ident) => {
+        match $x {
+            EvalValue::Value(val) => val,
+            EvalValue::Token(t) => match t {
+                Token::Identifier(ident) => {
+                    let var_ptr = get_var_ptr($v, &ident);
+                    let var_ref = var_ptr.borrow();
+                    var_ref.value.clone() // TODO: try to get rid of this
+                }
+                _ => value_from_token(&t, None),
+            },
+        }
+    };
+}
+
+macro_rules! comp {
+    ($l:ident, $r:ident, $c:tt) => {
+        match $l {
+            Value::Usize(l) => match $r {
+                Value::Usize(r) => l $c r,
+                Value::String(_) => panic!("Cannot compare usize to string"),
+                Value::Int(_) => panic!("Cannot compare usize to int"),
+                Value::Float(_) => panic!("Cannot compare usize to float"),
+                Value::Double(_) => panic!("Cannot compare usize to double"),
+                Value::Long(_) => panic!("Cannot compare usize to long"),
+                Value::Bool(_) => panic!("Cannot compare usize to bool"),
+                Value::Array(_) => panic!("Cannot compare usize to array"),
+            },
+            Value::String(l) => match $r {
+                Value::Usize(_) => panic!("Cannot compare string to usize"),
+                Value::String(r) => l $c r,
+                Value::Int(_) => panic!("Cannot compare string to int"),
+                Value::Float(_) => panic!("Cannot compare string to float"),
+                Value::Double(_) => panic!("Cannot compare string to double"),
+                Value::Long(_) => panic!("Cannot compare string to long"),
+                Value::Bool(_) => panic!("Cannot compare string to bool"),
+                Value::Array(_) => panic!("Cannot compare string to array"),
+            },
+            Value::Int(l) => match $r {
+                Value::Usize(_) => panic!("Cannot compare int to usize"),
+                Value::String(_) => panic!("Cannot compare int to string"),
+                Value::Int(r) => l $c r,
+                Value::Float(_) => panic!("Cannot compare int to float"),
+                Value::Double(_) => panic!("Cannot compare int to double"),
+                Value::Long(_) => panic!("Cannot compare int to long"),
+                Value::Bool(_) => panic!("Cannot compare int to bool"),
+                Value::Array(_) => panic!("Cannot compare int to array"),
+            },
+            Value::Float(l) => match $r {
+                Value::Usize(_) => panic!("Cannot compare float to usize"),
+                Value::String(_) => panic!("Cannot compare float to string"),
+                Value::Int(_) => panic!("Cannot compare float to int"),
+                Value::Float(r) => l $c r,
+                Value::Double(_) => panic!("Cannot compare float to double"),
+                Value::Long(_) => panic!("Cannot compare float to long"),
+                Value::Bool(_) => panic!("Cannot compare float to bool"),
+                Value::Array(_) => panic!("Cannot compare float to array"),
+            },
+            Value::Double(l) => match $r {
+                Value::Usize(_) => panic!("Cannot compare double to usize"),
+                Value::String(_) => panic!("Cannot compare double to string"),
+                Value::Int(_) => panic!("Cannot compare double to int"),
+                Value::Float(_) => panic!("Cannot compare double to float"),
+                Value::Double(r) => l $c r,
+                Value::Long(_) => panic!("Cannot compare double to long"),
+                Value::Bool(_) => panic!("Cannot compare double to bool"),
+                Value::Array(_) => panic!("Cannot compare double to array"),
+            },
+            Value::Long(l) => match $r {
+                Value::Usize(_) => panic!("Cannot compare long to usize"),
+                Value::String(_) => panic!("Cannot compare long to string"),
+                Value::Int(_) => panic!("Cannot compare long to int"),
+                Value::Float(_) => panic!("Cannot compare long to float"),
+                Value::Double(_) => panic!("Cannot compare long to double"),
+                Value::Long(r) => l $c r,
+                Value::Bool(_) => panic!("Cannot compare long to bool"),
+                Value::Array(_) => panic!("Cannot compare long to array"),
+            },
+            Value::Bool(l) => match $r {
+                Value::Usize(_) => panic!("Cannot compare bool to usize"),
+                Value::String(_) => panic!("Cannot compare bool to string"),
+                Value::Int(_) => panic!("Cannot compare bool to int"),
+                Value::Float(_) => panic!("Cannot compare bool to float"),
+                Value::Double(_) => panic!("Cannot compare bool to double"),
+                Value::Long(_) => panic!("Cannot compare bool to long"),
+                Value::Bool(r) => l $c r,
+                Value::Array(_) => panic!("Cannot compare bool to array"),
+            },
+            Value::Array(_) => match $r {
+                Value::Usize(_) => panic!("Cannot compare array to usize"),
+                Value::String(_) => panic!("Cannot compare array to string"),
+                Value::Int(_) => panic!("Cannot compare array to int"),
+                Value::Float(_) => panic!("Cannot compare array to float"),
+                Value::Double(_) => panic!("Cannot compare array to double"),
+                Value::Long(_) => panic!("Cannot compare array to long"),
+                Value::Bool(_) => panic!("Cannot compare array to bool"),
+                Value::Array(_) => unimplemented!()
+            },
+        }
+    };
+}
+
+pub fn compare<'a>(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    left: EvalValue,
+    right: EvalValue,
+    comp_token: &Token,
+) -> EvalValue<'a> {
+    let left_val = eval_val_macro!(vars, left);
+
+    let right_val = eval_val_macro!(vars, right);
+
+    let bool_res = match comp_token {
+        Token::EqCompare => comp!(left_val, right_val, ==),
+        Token::EqNCompare => comp!(left_val, right_val, !=),
+        Token::LAngle => comp!(left_val, right_val, <),
+        Token::RAngle => comp!(left_val, right_val, >),
+        Token::LAngleEq => comp!(left_val, right_val, <=),
+        Token::RAngleEq => comp!(left_val, right_val, >=),
+        _ => panic!("Expected comparison operator"),
+    };
+
+    EvalValue::Value(Value::Bool(bool_res))
 }

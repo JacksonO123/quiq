@@ -2,12 +2,12 @@ use std::{cell::RefCell, rc::Rc};
 
 use crate::{
     helpers::{
-        create_arr, create_bang_bool, create_cast_node, create_func_call_node, create_keyword_node,
-        create_make_var_node, create_set_var_node, get_exp_node, get_struct_access_tokens, is_exp,
-        is_sequence,
+        create_arr, create_bang_bool, create_cast_node, create_comp_node, create_func_call_node,
+        create_keyword_node, create_make_var_node, create_set_var_node, get_exp_node,
+        get_struct_access_tokens, is_exp, is_sequence,
     },
     interpreter::VarType,
-    tokenizer::Token,
+    tokenizer::{OperatorType, Token},
 };
 
 pub fn get_value_arr_str(values: &Vec<Value>) -> String {
@@ -70,6 +70,8 @@ pub enum AstNodeType<'a> {
     AccessStructProp(Token<'a>, Vec<AstNode<'a>>),
     /// to, node
     Cast(VarType, Box<AstNode<'a>>),
+    /// operator, left, right
+    Comparison(Token<'a>, Box<AstNode<'a>>, Box<AstNode<'a>>),
 }
 
 #[derive(Clone, Debug)]
@@ -85,6 +87,14 @@ impl<'a> AstNode<'a> {
     }
     pub fn get_str(&self) -> String {
         match &self.node_type {
+            AstNodeType::Comparison(operator, left, right) => {
+                format!(
+                    "Comparing: {} to {} with {:?}",
+                    left.get_str(),
+                    right.get_str(),
+                    operator
+                )
+            }
             AstNodeType::Cast(var_type, node) => {
                 format!("Casting {:?} to {:?}", node, var_type)
             }
@@ -176,10 +186,9 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNode<'
             tokens.remove(0);
         }
 
-        // if is_comparison(tokens) {
-        //     let comp_node = create_comp_node(tokens);
-        //     return Some(AstNode::new(comp_node));
-        // }
+        if let Some(comp_node) = create_comp_node(tokens) {
+            return Some(AstNode::new(comp_node));
+        }
 
         if is_exp(tokens) {
             let exp_nodes = get_exp_node(tokens);

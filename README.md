@@ -4,6 +4,13 @@ Another programming language
 
 This time written in rust
 
+## Todo
+
+- [ ] Comparisons
+- [ ] For, while loops
+- [ ] Functions
+- [ ] Structs
+
 ## Features
 
 - Variables

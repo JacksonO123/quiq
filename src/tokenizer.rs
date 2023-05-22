@@ -241,12 +241,14 @@ pub fn tokenize(code: &str) -> Vec<Option<Token>> {
             token = Token::Semicolon;
         } else if chars[i] == '=' {
             token = if i < chars.len() - 1 && chars[i + 1] == '=' {
+                i += 1;
                 Token::EqCompare
             } else {
                 Token::EqSet
             }
         } else if chars[i] == '!' {
             token = if i < chars.len() - 1 && chars[i + 1] == '=' {
+                i += 1;
                 Token::EqNCompare
             } else {
                 Token::Bang

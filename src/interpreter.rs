@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::{
     ast::{Ast, AstNode, AstNodeType, Value},
     helpers::{
-        cast, ensure_type, flatten_exp, get_array_type, get_eval_value, push_to_array,
+        cast, compare, ensure_type, flatten_exp, get_array_type, get_eval_value, push_to_array,
         set_var_value, ExpValue,
     },
     tokenizer::{OperatorType, Token},
@@ -378,6 +378,17 @@ pub fn eval_node<'a>(
     node: &AstNode<'a>,
 ) -> Option<EvalValue<'a>> {
     match &node.node_type {
+        AstNodeType::Comparison(comp_token, left, right) => {
+            if let Some(left_res) = eval_node(vars, Rc::clone(&functions), scope, left) {
+                if let Some(right_res) = eval_node(vars, functions, scope, right) {
+                    return Some(compare(vars, left_res, right_res, comp_token));
+                } else {
+                    panic!("Expected result value from left of condition");
+                }
+            } else {
+                panic!("Expected result value from left of condition");
+            }
+        }
         AstNodeType::Cast(var_type, node) => {
             let res_option = eval_node(vars, Rc::clone(&functions), scope, node.as_ref());
 
