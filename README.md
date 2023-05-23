@@ -6,8 +6,9 @@ This time written in rust
 
 ## Todo
 
-- [ ] Comparisons
-- [ ] For, while loops
+- [x] Comparisons
+- [x] For loop
+- [ ] While loops
 - [ ] Functions
 - [ ] Structs
 
