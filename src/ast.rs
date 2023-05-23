@@ -7,17 +7,37 @@ use crate::{
         get_struct_access_tokens, is_exp, is_sequence,
     },
     interpreter::VarType,
-    tokenizer::{OperatorType, Token},
+    tokenizer::Token,
 };
 
 pub fn get_value_arr_str(values: &Vec<Value>) -> String {
     let mut res = String::from("[");
 
-    for (i, item) in values.iter().enumerate() {
-        if i < values.len() - 1 {
-            res.push_str(format!("{}, ", item.get_str()).as_str());
-        } else {
-            res.push_str(item.get_str().as_str());
+    let size_buffer = 100;
+
+    if values.len() < size_buffer * 2 {
+        for (i, item) in values.iter().enumerate() {
+            if i < values.len() - 1 {
+                res.push_str(format!("{}, ", item.get_str()).as_str());
+            } else {
+                res.push_str(item.get_str().as_str());
+            }
+        }
+    } else {
+        for i in 0..size_buffer {
+            res.push_str(values[i].get_str().as_str());
+            if i < size_buffer - 1 {
+                res.push_str(", ");
+            } else {
+                res.push_str("  ...  ");
+            }
+        }
+
+        for i in values.len() - 1 - size_buffer..values.len() {
+            res.push_str(values[i].get_str().as_str());
+            if i < values.len() - 1 {
+                res.push_str(", ");
+            }
         }
     }
 
@@ -41,7 +61,7 @@ impl Value {
     pub fn get_str(&self) -> String {
         match self {
             Value::Usize(v) => v.to_string(),
-            Value::String(v) => v.to_string(),
+            Value::String(v) => v.clone(),
             Value::Float(v) => v.to_string(),
             Value::Double(v) => v.to_string(),
             Value::Long(v) => v.to_string(),
@@ -72,6 +92,13 @@ pub enum AstNodeType<'a> {
     Cast(VarType, Box<AstNode<'a>>),
     /// operator, left, right
     Comparison(Token<'a>, Box<AstNode<'a>>, Box<AstNode<'a>>),
+    /// ident, from, to, node
+    ForFromTo(
+        Token<'a>,
+        Box<AstNode<'a>>,
+        Box<AstNode<'a>>,
+        Box<AstNode<'a>>,
+    ),
 }
 
 #[derive(Clone, Debug)]
@@ -87,6 +114,12 @@ impl<'a> AstNode<'a> {
     }
     pub fn get_str(&self) -> String {
         match &self.node_type {
+            AstNodeType::ForFromTo(ident, from, to, node) => format!(
+                "Looping {} from {} to {}",
+                node.get_str(),
+                from.get_str(),
+                to.get_str(),
+            ),
             AstNodeType::Comparison(operator, left, right) => {
                 format!(
                     "Comparing: {} to {} with {:?}",
@@ -244,29 +277,43 @@ fn get_sequence_slice<'a>(
     start: usize,
 ) -> Vec<Option<Token<'a>>> {
     let mut slice = Vec::new();
-    let mut search_for_close_brace = false;
+    let mut open_parens = 0;
 
     for i in start..tokens.len() {
         slice.push(Some(tokens[i].take().unwrap()));
         match slice[slice.len() - 1].as_ref().unwrap() {
             Token::Semicolon => {
-                if !search_for_close_brace {
+                if open_parens == 0 {
                     break;
                 }
             }
+            Token::LParen => {
+                open_parens += 1;
+            }
+            Token::RParen => {
+                open_parens -= 1;
+            }
+            Token::LBracket => {
+                open_parens += 1;
+            }
+            Token::RBracket => {
+                open_parens -= 1;
+            }
             Token::LBrace => {
-                search_for_close_brace = true;
+                open_parens += 1;
             }
             Token::RBrace => {
-                search_for_close_brace = false;
-                break;
+                open_parens -= 1;
+                if open_parens == 0 {
+                    break;
+                }
             }
             _ => {}
         }
     }
 
-    if search_for_close_brace {
-        panic!("Expected token: \"}}\"");
+    if open_parens > 0 {
+        panic!("Expected token: `}}` or `;`");
     }
 
     slice

@@ -1,10 +1,52 @@
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 
 use crate::{
     ast::{get_ast_node, get_value_arr_str, AstNode, AstNodeType, Value},
     interpreter::{eval_node, get_var_ptr, value_from_token, EvalValue, Func, VarType, VarValue},
     tokenizer::Token,
 };
+
+pub fn make_var<'a>(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    functions: Rc<RefCell<Vec<Func<'a>>>>,
+    scope: usize,
+    var_type: &VarType,
+    name: &Token,
+    value: &Box<AstNode<'a>>,
+    stdout: &mut Stdout,
+) {
+    let value = eval_node(vars, functions, scope, value.as_ref(), stdout);
+    if let Some(tok) = value {
+        let val = match tok {
+            EvalValue::Token(t) => value_from_token(&t, Some(var_type)),
+            EvalValue::Value(v) => {
+                if ensure_type(&var_type, &v) {
+                    v
+                } else {
+                    panic!(
+                        "Unexpected variable type definition, expected {:?} found {:?}",
+                        match v {
+                            Value::Array(arr) => VarType::Array(Box::new(get_array_type(&arr))),
+                            _ => panic!(),
+                        },
+                        var_type
+                    )
+                }
+            }
+        };
+
+        let var_name = if let Token::Identifier(ident) = name {
+            ident
+        } else {
+            panic!("Expected identifier for variable name");
+        };
+
+        let var = Rc::new(RefCell::new(VarValue::new(var_name.clone(), val, scope)));
+        vars.insert(var_name.clone(), var);
+    } else {
+        panic!("Expected {} found void", var_type.get_str());
+    }
+}
 
 pub fn create_make_var_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
     let mut var_type = if let Token::Type(t) = tokens[0].take().unwrap() {
@@ -66,6 +108,7 @@ pub fn create_keyword_node<'a>(
 ) -> AstNodeType<'a> {
     match keyword {
         "if" => {
+            // 2 because tokens: [if, (]
             let mut condition = tokens_to_delimiter(tokens, 2, ")");
             let condition_len = condition.len();
             let condition_node = get_ast_node(&mut condition);
@@ -85,7 +128,36 @@ pub fn create_keyword_node<'a>(
             }
         }
         "else" => unimplemented!(),
-        "for" => unimplemented!(),
+        "for" => {
+            // 2 because tokens: [for, (]
+            let mut range_tokens = tokens_to_delimiter(tokens, 2, ")");
+
+            let ident = range_tokens[0].take().unwrap();
+            let mut start_tokens = tokens_to_delimiter(&mut range_tokens, 2, ";");
+            let mut end_tokens =
+                tokens_to_delimiter(&mut range_tokens, 3 + start_tokens.len(), ";");
+
+            let start_node = match get_ast_node(&mut start_tokens) {
+                Some(v) => v,
+                None => panic!("Expected start value in for loop"),
+            };
+            let end_node = match get_ast_node(&mut end_tokens) {
+                Some(v) => v,
+                None => panic!("Expected start value in for loop"),
+            };
+
+            let mut node_tokens = tokens_to_delimiter(tokens, range_tokens.len() + 4, "}");
+            if let Some(node) = get_ast_node(&mut node_tokens) {
+                AstNodeType::ForFromTo(
+                    ident,
+                    Box::new(start_node),
+                    Box::new(end_node),
+                    Box::new(node),
+                )
+            } else {
+                panic!("Expected block to loop");
+            }
+        }
         "while" => unimplemented!(),
         _ => panic!("Unexpected keyword: {:?}", tokens[0].as_ref().unwrap()),
     }
@@ -271,7 +343,6 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<Box<AstNode<
         }
 
         let mut to_op = tokens_to_operator(tokens, i);
-        println!("to op: {:?}", to_op);
 
         if to_op.len() > 0 {
             if match to_op[0].as_ref().unwrap() {
@@ -356,11 +427,18 @@ pub fn flatten_exp<'a>(
     functions: Rc<RefCell<Vec<Func<'a>>>>,
     scope: usize,
     exp: &Vec<Box<AstNode<'a>>>,
+    stdout: &mut Stdout,
 ) -> Vec<Option<ExpValue<'a>>> {
     let mut res = vec![];
 
     for exp_node in exp.iter() {
-        let tok_option = eval_node(vars, Rc::clone(&functions), scope, exp_node.as_ref());
+        let tok_option = eval_node(
+            vars,
+            Rc::clone(&functions),
+            scope,
+            exp_node.as_ref(),
+            stdout,
+        );
         if let Some(tok) = tok_option {
             let val = match tok {
                 EvalValue::Token(tok) => match tok {
@@ -508,11 +586,12 @@ pub fn push_to_array<'a>(
     scope: usize,
     arr: &mut Vec<Value>,
     args: &Vec<AstNode<'a>>,
+    stdout: &mut Stdout,
 ) {
     let arr_item_type = get_array_type(&arr);
 
     for arg in args.iter() {
-        let arg_res_option = eval_node(vars, Rc::clone(&functions), scope, arg);
+        let arg_res_option = eval_node(vars, Rc::clone(&functions), scope, arg, stdout);
 
         if let Some(arg_res) = arg_res_option {
             let val = get_eval_value(vars, arg_res);

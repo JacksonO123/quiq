@@ -6,6 +6,7 @@ mod tokenizer;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::io;
 use std::path::Path;
 use std::rc::Rc;
 use std::time::Instant;
@@ -46,8 +47,10 @@ fn main() {
 
     init_builtins(&mut vars, Rc::clone(&functions));
 
+    let mut stdout = io::stdout();
+
     let eval_start = Instant::now();
-    eval(&mut vars, functions, tree);
+    eval(&mut vars, functions, tree, &mut stdout);
     let eval_end = eval_start.elapsed();
 
     let end = start.elapsed();

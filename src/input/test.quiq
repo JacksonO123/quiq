@@ -1,5 +1,3 @@
-int v = 3;
-int[] arr = [];
-arr.push(v);
-v = 4;
-print(arr);
+for(i;0;10) {
+  print(i);
+}
