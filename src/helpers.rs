@@ -186,17 +186,23 @@ fn get_params<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<AstNode<'a>> {
 
     while i < tokens.len() {
         match tokens[i].as_ref().unwrap() {
-            Token::RParen => {
-                num_open_parens -= 1;
-            }
-            Token::LParen => {
-                num_open_parens += 1;
-            }
+            Token::RBracket => num_open_parens -= 1,
+            Token::LBracket => num_open_parens += 1,
+            Token::RBrace => num_open_parens -= 1,
+            Token::LBrace => num_open_parens += 1,
+            Token::RParen => num_open_parens -= 1,
+            Token::LParen => num_open_parens += 1,
             _ => {}
         }
 
         if num_open_parens < 0 {
             break;
+        }
+
+        if num_open_parens > 0 {
+            temp_tokens.push(Some(tokens[i].take().unwrap()));
+            i += 1;
+            continue;
         }
 
         match tokens[i].as_ref().unwrap() {
@@ -1025,7 +1031,7 @@ macro_rules! comp {
                 Value::Bool(r) => l $c r,
                 Value::Array(_) => panic!("Cannot compare bool to array"),
             },
-            Value::Array(_) => match $r {
+            Value::Array(l) => match $r {
                 Value::Usize(_) => panic!("Cannot compare array to usize"),
                 Value::String(_) => panic!("Cannot compare array to string"),
                 Value::Int(_) => panic!("Cannot compare array to int"),
@@ -1033,10 +1039,31 @@ macro_rules! comp {
                 Value::Double(_) => panic!("Cannot compare array to double"),
                 Value::Long(_) => panic!("Cannot compare array to long"),
                 Value::Bool(_) => panic!("Cannot compare array to bool"),
-                Value::Array(_) => unimplemented!()
+                Value::Array(r) => {
+                    compare_array(l, r, $r)
+                }
             },
         }
     };
+}
+
+fn compare_array(left: &Vec<Value>, right: &Vec<Value>, right_val: &Value) -> bool {
+    let arr_type = get_array_type(left);
+    if !ensure_type(&arr_type, right_val) {
+        if left.len() != right.len() {
+            return false;
+        }
+
+        for i in 0..left.len() {
+            if !comp!(&left[i], &right[i], ==) {
+                return false;
+            }
+        }
+
+        true
+    } else {
+        false
+    }
 }
 
 macro_rules! comp_match {
@@ -1062,7 +1089,7 @@ pub fn compare<'a>(
     let res = match left {
         EvalValue::Value(left_val) => match right {
             EvalValue::Value(right_val) => {
-                comp_match!(comp_token, left_val, right_val)
+                comp_match!(comp_token, &left_val, &right_val)
             }
             EvalValue::Token(t) => match t {
                 Token::Identifier(ident) => {
@@ -1073,7 +1100,7 @@ pub fn compare<'a>(
                 }
                 _ => {
                     let right_val = value_from_token(&t, None);
-                    comp_match!(comp_token, left_val, right_val)
+                    comp_match!(comp_token, &left_val, &right_val)
                 }
             },
         },
@@ -1105,7 +1132,7 @@ pub fn compare<'a>(
 
                 match right {
                     EvalValue::Value(right_val) => {
-                        comp_match!(comp_token, left_val, right_val)
+                        comp_match!(comp_token, &left_val, &right_val)
                     }
                     EvalValue::Token(t) => match t {
                         Token::Identifier(ident) => {
@@ -1116,7 +1143,7 @@ pub fn compare<'a>(
                         }
                         _ => {
                             let right_val = value_from_token(&t, None);
-                            comp_match!(comp_token, left_val, right_val)
+                            comp_match!(comp_token, &left_val, &right_val)
                         }
                     },
                 }

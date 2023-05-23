@@ -400,7 +400,6 @@ macro_rules! for_loop {
         let var_value = VarValue::new($name, Value::$variant(current), $scope);
         $vars.insert($name.clone(), Rc::new(RefCell::new(var_value)));
 
-        // do more stuff
         if inc >= 0 {
             while current < to_num {
                 eval_node($vars, Rc::clone(&$functions), $scope, $node, $stdout);
@@ -470,6 +469,21 @@ pub fn eval_node<'a>(
                             scope,
                             Int,
                             i32,
+                            start,
+                            to_val,
+                            inc_val,
+                            node,
+                            var_name.to_owned()
+                        );
+                    }
+                    Value::Usize(start) => {
+                        for_loop!(
+                            stdout,
+                            vars,
+                            functions,
+                            scope,
+                            Usize,
+                            usize,
                             start,
                             to_val,
                             inc_val,

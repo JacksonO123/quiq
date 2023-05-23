@@ -13,7 +13,7 @@ use crate::{
 pub fn get_value_arr_str(values: &Vec<Value>) -> String {
     let mut res = String::from("[");
 
-    let size_buffer = 100;
+    let size_buffer = 50;
 
     if values.len() < size_buffer * 2 {
         for (i, item) in values.iter().enumerate() {

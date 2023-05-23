@@ -1,5 +1,1 @@
-int[] v = [];
-for (i; 10; 0; -2) {
-  v.push(i);
-}
-print(v);
+print([true, false] == [true, false]);
