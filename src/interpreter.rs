@@ -1,9 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    io::{self, Stdout},
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 
 use crate::{
     ast::{Ast, AstNode, AstNodeType, Value},
@@ -383,6 +378,29 @@ pub fn eval_exp<'a>(
     }
 }
 
+macro_rules! for_loop {
+    ($stdout:ident, $vars:ident, $functions:ident, $scope:expr, $variant:ident, $start:expr, $to:ident, $node:ident, $name:expr) => {
+        let to_num = match $to {
+            Value::$variant(num) => num,
+            _ => panic!("Expected int value for `to` value"),
+        };
+
+        let mut current = $start;
+
+        let var_value = VarValue::new($name, Value::$variant(current), $scope);
+        $vars.insert($name.clone(), Rc::new(RefCell::new(var_value)));
+
+        while current < to_num {
+            eval_node($vars, Rc::clone(&$functions), $scope, $node, $stdout);
+
+            current += 1;
+
+            let var_ptr = $vars.get(&$name).unwrap();
+            var_ptr.borrow_mut().value = Value::$variant(current);
+        }
+    };
+}
+
 /// evaluate ast node
 /// return type is single value
 /// Ex: AstNode::Token(bool) -> Token(bool)
@@ -408,31 +426,30 @@ pub fn eval_node<'a>(
                     };
                 match from_val {
                     Value::Int(start) => {
-                        let to_num = match to_val {
-                            Value::Int(num) => num,
-                            _ => panic!("Expected int value for `to` value"),
-                        };
-
-                        let mut current = start;
-
-                        let var_value =
-                            VarValue::new(var_name.to_owned(), Value::Int(current), scope);
-                        vars.insert(var_name.clone(), Rc::new(RefCell::new(var_value)));
-
-                        while current < to_num {
-                            eval_node(vars, Rc::clone(&functions), scope, node, stdout);
-
-                            current += 1;
-
-                            let var_ptr = vars.get(var_name).unwrap();
-                            var_ptr.borrow_mut().value = Value::Int(current);
-                        }
+                        for_loop!(
+                            stdout,
+                            vars,
+                            functions,
+                            scope,
+                            Int,
+                            start,
+                            to_val,
+                            node,
+                            var_name.to_owned()
+                        );
                     }
-                    Value::Long(num) => {
-                        let to_num = match to_val {
-                            Value::Long(num) => num,
-                            _ => panic!("Expected long value for `to` value"),
-                        };
+                    Value::Long(start) => {
+                        for_loop!(
+                            stdout,
+                            vars,
+                            functions,
+                            scope,
+                            Long,
+                            start,
+                            to_val,
+                            node,
+                            var_name.to_owned()
+                        );
                     }
                     _ => panic!("Unexpected start type in for loop, expected int or long"),
                 }

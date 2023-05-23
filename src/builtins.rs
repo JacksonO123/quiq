@@ -1,9 +1,4 @@
-use std::{
-    cell::RefCell,
-    collections::HashMap,
-    io::{self, Write},
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, io::Write, rc::Rc};
 
 use crate::{
     interpreter::{get_var_ptr, value_from_token, BuiltinFunc, EvalValue, Func, VarValue},

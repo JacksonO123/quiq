@@ -143,7 +143,7 @@ pub fn create_keyword_node<'a>(
             };
             let end_node = match get_ast_node(&mut end_tokens) {
                 Some(v) => v,
-                None => panic!("Expected start value in for loop"),
+                None => panic!("Expected end value in for loop"),
             };
 
             let mut node_tokens = tokens_to_delimiter(tokens, range_tokens.len() + 4, "}");
@@ -264,26 +264,26 @@ pub fn tokens_to_delimiter<'a>(
 
     let mut open_brackets = 0;
     for i in start..tokens.len() {
-        if match tokens[i].as_ref().unwrap() {
-            Token::LParen => true,
-            Token::LBrace => true,
-            Token::LBracket => true,
-            _ => false,
-        } {
-            open_brackets += 1;
-        } else if match tokens[i].as_ref().unwrap() {
-            Token::RParen => true,
-            Token::RBrace => true,
-            Token::RBracket => true,
-            _ => false,
-        } {
-            open_brackets -= 1;
-        }
-
-        if tokens[i].as_ref().unwrap().get_str() != delimiter || open_brackets > 0 {
-            res.push(Some(tokens[i].take().unwrap()));
-        } else {
+        if tokens[i].as_ref().unwrap().get_str() == delimiter && open_brackets == 0 {
             return res;
+        } else {
+            if match tokens[i].as_ref().unwrap() {
+                Token::LParen => true,
+                Token::LBrace => true,
+                Token::LBracket => true,
+                _ => false,
+            } {
+                open_brackets += 1;
+            } else if match tokens[i].as_ref().unwrap() {
+                Token::RParen => true,
+                Token::RBrace => true,
+                Token::RBracket => true,
+                _ => false,
+            } {
+                open_brackets -= 1;
+            }
+
+            res.push(Some(tokens[i].take().unwrap()));
         }
     }
 
