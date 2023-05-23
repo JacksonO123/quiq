@@ -137,6 +137,12 @@ pub fn create_keyword_node<'a>(
             let mut end_tokens =
                 tokens_to_delimiter(&mut range_tokens, 3 + start_tokens.len(), ";");
 
+            let mut inc_tokens = tokens_to_delimiter(
+                &mut range_tokens,
+                4 + start_tokens.len() + end_tokens.len(),
+                ")",
+            );
+
             let start_node = match get_ast_node(&mut start_tokens) {
                 Some(v) => v,
                 None => panic!("Expected start value in for loop"),
@@ -145,6 +151,13 @@ pub fn create_keyword_node<'a>(
                 Some(v) => v,
                 None => panic!("Expected end value in for loop"),
             };
+            let inc_node = if inc_tokens.len() > 0 {
+                Some(Box::new(
+                    get_ast_node(&mut inc_tokens).expect("Expected inc value in for loop"),
+                ))
+            } else {
+                None
+            };
 
             let mut node_tokens = tokens_to_delimiter(tokens, range_tokens.len() + 4, "}");
             if let Some(node) = get_ast_node(&mut node_tokens) {
@@ -152,6 +165,7 @@ pub fn create_keyword_node<'a>(
                     ident,
                     Box::new(start_node),
                     Box::new(end_node),
+                    inc_node,
                     Box::new(node),
                 )
             } else {

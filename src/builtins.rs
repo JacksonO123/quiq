@@ -6,7 +6,7 @@ use crate::{
 };
 
 pub fn init_builtins(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    _vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func>>>,
 ) {
     functions.borrow_mut().push(Func::Builtin(BuiltinFunc::new(

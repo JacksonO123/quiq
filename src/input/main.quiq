@@ -1,5 +1,5 @@
 int[] v = [];
-for (i;long(0);long(10)) {
+for (i; 10; 0; -2) {
   v.push(i);
 }
 print(v);

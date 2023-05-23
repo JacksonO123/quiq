@@ -92,11 +92,12 @@ pub enum AstNodeType<'a> {
     Cast(VarType, Box<AstNode<'a>>),
     /// operator, left, right
     Comparison(Token<'a>, Box<AstNode<'a>>, Box<AstNode<'a>>),
-    /// ident, from, to, node
+    /// ident, from, to, inc, node
     ForFromTo(
         Token<'a>,
         Box<AstNode<'a>>,
         Box<AstNode<'a>>,
+        Option<Box<AstNode<'a>>>,
         Box<AstNode<'a>>,
     ),
 }
@@ -114,11 +115,17 @@ impl<'a> AstNode<'a> {
     }
     pub fn get_str(&self) -> String {
         match &self.node_type {
-            AstNodeType::ForFromTo(ident, from, to, node) => format!(
-                "Looping {} from {} to {}",
+            AstNodeType::ForFromTo(ident, from, to, inc, node) => format!(
+                "Looping {} from {} to {} by {} using {}",
                 node.get_str(),
                 from.get_str(),
                 to.get_str(),
+                if inc.is_some() {
+                    inc.as_ref().unwrap().get_str()
+                } else {
+                    String::from("inc value not provided")
+                },
+                ident.get_str()
             ),
             AstNodeType::Comparison(operator, left, right) => {
                 format!(

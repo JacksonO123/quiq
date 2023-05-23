@@ -379,24 +379,46 @@ pub fn eval_exp<'a>(
 }
 
 macro_rules! for_loop {
-    ($stdout:ident, $vars:ident, $functions:ident, $scope:expr, $variant:ident, $start:expr, $to:ident, $node:ident, $name:expr) => {
+    ($stdout:ident, $vars:ident, $functions:ident, $scope:expr, $variant:ident, $type:tt, $start:expr, $to:expr, $inc:expr, $node:ident, $name:expr) => {
         let to_num = match $to {
             Value::$variant(num) => num,
-            _ => panic!("Expected int value for `to` value"),
+            _ => panic!("Expected from to and inc to be of same type"),
         };
 
         let mut current = $start;
 
+        let inc = if let Some(inc_value) = $inc {
+            match inc_value {
+                Value::$variant(num) => num,
+                _ => panic!("Expected from to and inc to be of same type"),
+            }
+        } else {
+            let num = if current <= to_num { 1 } else { -1 };
+            num as $type
+        };
+
         let var_value = VarValue::new($name, Value::$variant(current), $scope);
         $vars.insert($name.clone(), Rc::new(RefCell::new(var_value)));
 
-        while current < to_num {
-            eval_node($vars, Rc::clone(&$functions), $scope, $node, $stdout);
+        // do more stuff
+        if inc >= 0 {
+            while current < to_num {
+                eval_node($vars, Rc::clone(&$functions), $scope, $node, $stdout);
 
-            current += 1;
+                current += inc;
 
-            let var_ptr = $vars.get(&$name).unwrap();
-            var_ptr.borrow_mut().value = Value::$variant(current);
+                let var_ptr = $vars.get(&$name).unwrap();
+                var_ptr.borrow_mut().value = Value::$variant(current);
+            }
+        } else {
+            while to_num < current {
+                eval_node($vars, Rc::clone(&$functions), $scope, $node, $stdout);
+
+                current += inc;
+
+                let var_ptr = $vars.get(&$name).unwrap();
+                var_ptr.borrow_mut().value = Value::$variant(current);
+            }
         }
     };
 }
@@ -412,7 +434,7 @@ pub fn eval_node<'a>(
     stdout: &mut Stdout,
 ) -> Option<EvalValue<'a>> {
     match &node.node_type {
-        AstNodeType::ForFromTo(ident, from, to, node) => {
+        AstNodeType::ForFromTo(ident, from, to, inc, node) => {
             if let Token::Identifier(var_name) = ident {
                 let from_val =
                     match eval_node(vars, Rc::clone(&functions), scope, from.as_ref(), stdout) {
@@ -424,6 +446,21 @@ pub fn eval_node<'a>(
                         Some(ev) => get_eval_value(vars, ev),
                         None => panic!("Expected to value in for loop"),
                     };
+                let inc_val = if let Some(inc_value_node) = inc {
+                    match eval_node(
+                        vars,
+                        Rc::clone(&functions),
+                        scope,
+                        inc_value_node.as_ref(),
+                        stdout,
+                    ) {
+                        Some(ev) => Some(get_eval_value(vars, ev)),
+                        None => panic!("Expected to value in for loop"),
+                    }
+                } else {
+                    None
+                };
+
                 match from_val {
                     Value::Int(start) => {
                         for_loop!(
@@ -432,8 +469,10 @@ pub fn eval_node<'a>(
                             functions,
                             scope,
                             Int,
+                            i32,
                             start,
                             to_val,
+                            inc_val,
                             node,
                             var_name.to_owned()
                         );
@@ -445,8 +484,10 @@ pub fn eval_node<'a>(
                             functions,
                             scope,
                             Long,
+                            i64,
                             start,
                             to_val,
+                            inc_val,
                             node,
                             var_name.to_owned()
                         );
