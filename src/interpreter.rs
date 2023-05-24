@@ -3,8 +3,8 @@ use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 use crate::{
     ast::{Ast, AstNode, AstNodeType, Value},
     helpers::{
-        cast, compare, flatten_exp, get_eval_value, make_var, push_to_array, set_var_value,
-        ExpValue,
+        cast, compare, flatten_exp, get_eval_value, index_arr, make_var, push_to_array,
+        set_index_arr, set_var_value, ExpValue,
     },
     tokenizer::{OperatorType, Token},
 };
@@ -86,6 +86,7 @@ impl VarType {
     }
 }
 
+#[derive(Debug)]
 pub struct VarValue {
     pub value: Value,
     pub scope: usize,
@@ -379,7 +380,7 @@ pub fn eval_exp<'a>(
 }
 
 macro_rules! for_loop {
-    ($stdout:ident, $vars:ident, $functions:ident, $scope:expr, $variant:ident, $type:tt, $start:expr, $to:expr, $inc:expr, $node:ident, $name:expr) => {
+    ($stdout:ident, $vars:ident, $functions:ident, $scope:expr, $variant:ident, $type:ty, $start:expr, $to:expr, $inc:expr, $node:ident, $name:expr) => {
         let to_num = match $to {
             Value::$variant(num) => num,
             _ => panic!("Expected from to and inc to be of same type"),
@@ -433,6 +434,42 @@ pub fn eval_node<'a>(
     stdout: &mut Stdout,
 ) -> Option<EvalValue<'a>> {
     match &node.node_type {
+        AstNodeType::SetArrIndex(arr_tok, index_node, value) => {
+            if let Some(index) = eval_node(vars, Rc::clone(&functions), scope, index_node, stdout) {
+                if let Token::Identifier(ident) = arr_tok {
+                    let var_ptr = get_var_ptr(vars, &ident);
+                    set_index_arr(
+                        vars,
+                        Rc::clone(&functions),
+                        scope,
+                        stdout,
+                        var_ptr,
+                        index,
+                        value.as_ref().clone(),
+                    );
+
+                    None
+                } else {
+                    panic!("Expected identifier to index");
+                }
+            } else {
+                panic!("Expected value to index array with");
+            }
+        }
+        AstNodeType::IndexArr(arr_tok, index_node) => {
+            if let Some(index) = eval_node(vars, Rc::clone(&functions), scope, index_node, stdout) {
+                if let Token::Identifier(ident) = arr_tok {
+                    let var_ptr = get_var_ptr(vars, &ident);
+                    let res = index_arr(vars, var_ptr, index);
+
+                    Some(EvalValue::Value(res))
+                } else {
+                    panic!("Expected identifier to index");
+                }
+            } else {
+                panic!("Expected value to index array with");
+            }
+        }
         AstNodeType::ForFromTo(ident, from, to, inc, node) => {
             if let Token::Identifier(var_name) = ident {
                 let from_val =

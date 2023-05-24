@@ -8,6 +8,7 @@ This time written in rust
 
 - [x] Comparisons
 - [x] For loop
+- [ ] Add ref as a value type (basically a pointer)
 - [ ] While loops
 - [ ] Functions
 - [ ] Structs

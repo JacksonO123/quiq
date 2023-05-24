@@ -1,1 +1,7 @@
-print([true, false] == [true, false]);
+int[] v = [1, 2, 3, 4, 5];
+
+for (i; usize(0); v.length) {
+  v[i] = i + usize(10);
+}
+
+print(v);

@@ -4,7 +4,7 @@ use crate::{
     helpers::{
         create_arr, create_bang_bool, create_cast_node, create_comp_node, create_func_call_node,
         create_keyword_node, create_make_var_node, create_set_var_node, get_exp_node,
-        get_struct_access_tokens, is_exp, is_sequence,
+        get_struct_access_tokens, is_exp, is_sequence, tokens_to_delimiter,
     },
     interpreter::VarType,
     tokenizer::Token,
@@ -100,6 +100,9 @@ pub enum AstNodeType<'a> {
         Option<Box<AstNode<'a>>>,
         Box<AstNode<'a>>,
     ),
+    IndexArr(Token<'a>, Box<AstNode<'a>>),
+    /// arr ident, index, value
+    SetArrIndex(Token<'a>, Box<AstNode<'a>>, Box<AstNode<'a>>),
 }
 
 #[derive(Clone, Debug)]
@@ -115,6 +118,17 @@ impl<'a> AstNode<'a> {
     }
     pub fn get_str(&self) -> String {
         match &self.node_type {
+            AstNodeType::SetArrIndex(arr, index, value) => {
+                format!(
+                    "setting {} to {} at {}",
+                    arr.get_str(),
+                    index.as_ref().get_str(),
+                    value.as_ref().get_str()
+                )
+            }
+            AstNodeType::IndexArr(arr, index) => {
+                format!("indexing {} at {}", arr.get_str(), index.get_str())
+            }
             AstNodeType::ForFromTo(ident, from, to, inc, node) => format!(
                 "Looping {} from {} to {} by {} using {}",
                 node.get_str(),
@@ -129,17 +143,17 @@ impl<'a> AstNode<'a> {
             ),
             AstNodeType::Comparison(operator, left, right) => {
                 format!(
-                    "Comparing: {} to {} with {:?}",
+                    "Comparing: {} to {} with {}",
                     left.get_str(),
                     right.get_str(),
-                    operator
+                    operator.get_str()
                 )
             }
             AstNodeType::Cast(var_type, node) => {
                 format!("Casting {:?} to {:?}", node, var_type)
             }
             AstNodeType::AccessStructProp(struct_token, prop) => {
-                format!("Accessing {:?} on {:?}", prop, struct_token)
+                format!("Accessing {:?} on {}", prop, struct_token.get_str())
             }
             AstNodeType::Array(arr) => format!("{:?}", arr),
             AstNodeType::If(condition, node) => {
@@ -154,8 +168,8 @@ impl<'a> AstNode<'a> {
             }
             AstNodeType::MakeVar(var_type, name, value) => {
                 format!(
-                    "Setting {:?} to {} as {}",
-                    name,
+                    "Setting {} to {} as {}",
+                    name.get_str(),
                     value.get_str().as_str(),
                     var_type.get_str()
                 )
@@ -258,6 +272,66 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNode<'
                         struct_token,
                         access_token_nodes,
                     ))
+                }
+                Token::LBracket => {
+                    let mut index_tokens = tokens_to_delimiter(tokens, 2, "]");
+                    let arr_index_end = 3 + index_tokens.len();
+
+                    Some(if let Some(index_node) = get_ast_node(&mut index_tokens) {
+                        tokens.drain(1..arr_index_end);
+
+                        if let Token::Semicolon = tokens.last().as_ref().unwrap().as_ref().unwrap()
+                        {
+                            tokens.remove(tokens.len() - 1);
+                        }
+
+                        if tokens.len() > 1 {
+                            match tokens[1].as_ref().unwrap() {
+                                Token::EqSet => {
+                                    let arr_var_name = tokens.remove(0);
+                                    tokens.remove(0);
+
+                                    if let Some(value_node) = get_ast_node(tokens) {
+                                        AstNodeType::SetArrIndex(
+                                            arr_var_name.unwrap(),
+                                            Box::new(index_node),
+                                            Box::new(value_node),
+                                        )
+                                    } else {
+                                        panic!("expected value to set at index");
+                                    }
+                                }
+                                _ => unimplemented!(),
+                            }
+                        } else {
+                            AstNodeType::IndexArr(tokens[0].take().unwrap(), Box::new(index_node))
+                        }
+                    } else {
+                        panic!("Expected value to index array with");
+                    })
+
+                    // let (res, num) = create_index_arr_node(tokens);
+                    // tokens.drain(0..num);
+
+                    // // 1 because of semicolon at end
+                    // let num = if let Token::Semicolon =
+                    //     tokens.last().as_ref().unwrap().as_ref().unwrap()
+                    // {
+                    //     1
+                    // } else {
+                    //     0
+                    // };
+                    // if tokens.len() > num {
+                    //     match tokens[0].as_ref().unwrap() {
+                    //         Token::EqSet => {
+                    //             println!("setting");
+                    //         }
+                    //         _ => unreachable!(),
+                    //     }
+                    //     return None;
+                    // }
+
+                    // Some(res)
                 }
                 _ => unimplemented!(),
             },

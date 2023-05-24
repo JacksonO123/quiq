@@ -352,6 +352,11 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<Box<AstNode<
 
     let mut i = 0;
     while i < tokens.len() {
+        if tokens[i].as_ref().is_none() {
+            i += 1;
+            continue;
+        }
+
         match tokens[i].as_ref().unwrap() {
             Token::Operator(_) => {
                 let node = AstNode::new(AstNodeType::Token(tokens[i].take().unwrap()));
@@ -388,6 +393,10 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<Box<AstNode<
 }
 
 pub fn is_exp(tokens: &mut Vec<Option<Token>>) -> bool {
+    let mut open_paren = 0;
+    let mut has_operator = false;
+    let mut has_eq_set = false;
+
     let mut i = 0;
     while i < tokens.len() {
         if tokens[i].is_none() {
@@ -396,44 +405,29 @@ pub fn is_exp(tokens: &mut Vec<Option<Token>>) -> bool {
         }
 
         match tokens[i].as_ref().unwrap() {
-            Token::LParen => {
-                while i < tokens.len()
-                    && match tokens[i].as_ref().unwrap() {
-                        Token::RParen => false,
-                        _ => true,
-                    }
-                {
-                    i += 1;
+            Token::LParen => open_paren += 1,
+            Token::RParen => open_paren -= 1,
+            Token::LBrace => open_paren += 1,
+            Token::RBrace => open_paren -= 1,
+            Token::LBracket => open_paren += 1,
+            Token::RBracket => open_paren -= 1,
+            Token::Operator(_) => {
+                if open_paren == 0 {
+                    has_operator = true;
                 }
             }
-            Token::LBrace => {
-                while i < tokens.len()
-                    && match tokens[i].as_ref().unwrap() {
-                        Token::RBrace => false,
-                        _ => true,
-                    }
-                {
-                    i += 1;
+            Token::EqSet => {
+                if open_paren == 0 {
+                    has_eq_set = true;
                 }
             }
-            Token::LBracket => {
-                while i < tokens.len()
-                    && match tokens[i].as_ref().unwrap() {
-                        Token::RBracket => false,
-                        _ => true,
-                    }
-                {
-                    i += 1;
-                }
-            }
-            Token::Operator(_) => return true,
             _ => {}
         }
 
         i += 1;
     }
 
-    false
+    has_operator && !has_eq_set
 }
 
 #[derive(Clone, Debug)]
@@ -1152,4 +1146,49 @@ pub fn compare<'a>(
     };
 
     EvalValue::Value(Value::Bool(res))
+}
+
+pub fn index_arr(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    arr: Rc<RefCell<VarValue>>,
+    index: EvalValue,
+) -> Value {
+    match &arr.borrow().value {
+        Value::Array(arr) => {
+            let index = get_eval_value(vars, index);
+
+            match index {
+                Value::Usize(val) => arr[val].clone(),
+                _ => {
+                    panic!("Array can only be indexed by usize");
+                }
+            }
+        }
+        _ => panic!("Cannot index a non-array type"),
+    }
+}
+
+pub fn set_index_arr<'a>(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    functions: Rc<RefCell<Vec<Func<'a>>>>,
+    scope: usize,
+    stdout: &mut Stdout,
+    arr: Rc<RefCell<VarValue>>,
+    index: EvalValue,
+    value: AstNode<'a>,
+) {
+    if let Some(value) = eval_node(vars, functions, scope, &value, stdout) {
+        let index_val = get_eval_value(vars, index);
+        match index_val {
+            Value::Usize(val) => match arr.borrow_mut().value {
+                Value::Array(ref mut arr_val) => {
+                    arr_val[val] = get_eval_value(vars, value);
+                }
+                _ => panic!("Only arrays can be indexed"),
+            },
+            _ => panic!("Array can only be indexed with usize"),
+        }
+    } else {
+        panic!("Expected value to set at array index");
+    }
 }
