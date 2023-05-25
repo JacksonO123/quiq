@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 
 use crate::{
-    ast::{get_ast_node, get_value_arr_str, AstNode, AstNodeType, Value},
+    ast::{get_ast_node, get_value_arr_str, AstNode, Value},
     interpreter::{eval_node, get_var_ptr, value_from_token, EvalValue, Func, VarType, VarValue},
     tokenizer::Token,
 };
@@ -48,7 +48,7 @@ pub fn make_var<'a>(
     }
 }
 
-pub fn create_make_var_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
+pub fn create_make_var_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a> {
     let mut var_type = if let Token::Type(t) = tokens[0].take().unwrap() {
         t
     } else {
@@ -86,26 +86,23 @@ pub fn create_make_var_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeT
         panic!("Invalid value, expected value to set variable");
     }
 
-    AstNodeType::MakeVar(
+    AstNode::MakeVar(
         var_type,
         tokens[eq_pos - 1].take().unwrap(),
         Box::new(node.unwrap()),
     )
 }
 
-pub fn create_set_var_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
+pub fn create_set_var_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a> {
     let mut value_to_set = tokens_to_delimiter(tokens, 2, ";");
     let node = get_ast_node(&mut value_to_set);
     if node.is_none() {
         panic!("Invalid value, expected value to set variable");
     }
-    AstNodeType::SetVar(tokens[0].take().unwrap(), Box::new(node.unwrap()))
+    AstNode::SetVar(tokens[0].take().unwrap(), Box::new(node.unwrap()))
 }
 
-pub fn create_keyword_node<'a>(
-    tokens: &mut Vec<Option<Token<'a>>>,
-    keyword: &str,
-) -> AstNodeType<'a> {
+pub fn create_keyword_node<'a>(tokens: &mut Vec<Option<Token<'a>>>, keyword: &str) -> AstNode<'a> {
     match keyword {
         "if" => {
             // 2 because tokens: [if, (]
@@ -119,7 +116,7 @@ pub fn create_keyword_node<'a>(
 
             if let Some(c_node) = condition_node {
                 if let Some(tr_node) = to_run_node {
-                    AstNodeType::If(Box::new(c_node), Box::new(tr_node))
+                    AstNode::If(Box::new(c_node), Box::new(tr_node))
                 } else {
                     panic!("Expected block for `if`");
                 }
@@ -161,7 +158,7 @@ pub fn create_keyword_node<'a>(
 
             let mut node_tokens = tokens_to_delimiter(tokens, range_tokens.len() + 4, "}");
             if let Some(node) = get_ast_node(&mut node_tokens) {
-                AstNodeType::ForFromTo(
+                AstNode::ForFromTo(
                     ident,
                     Box::new(start_node),
                     Box::new(end_node),
@@ -239,7 +236,7 @@ fn get_params<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<AstNode<'a>> {
     arg_nodes
 }
 
-pub fn create_func_call_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
+pub fn create_func_call_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a> {
     let params = get_params(tokens);
 
     let func_name = if let Token::Identifier(ident) = tokens[0].take().unwrap() {
@@ -248,7 +245,7 @@ pub fn create_func_call_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode
         panic!("Expected identifier for func name");
     };
 
-    AstNodeType::CallFunc(func_name, params)
+    AstNode::CallFunc(func_name, params)
 }
 
 pub fn set_var_value<'a>(
@@ -359,7 +356,7 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<Box<AstNode<
 
         match tokens[i].as_ref().unwrap() {
             Token::Operator(_) => {
-                let node = AstNode::new(AstNodeType::Token(tokens[i].take().unwrap()));
+                let node = AstNode::Token(tokens[i].take().unwrap());
                 res.push(Box::new(node));
                 i += 1;
                 continue;
@@ -377,7 +374,7 @@ pub fn get_exp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Vec<Box<AstNode<
                 let slice = &to_op[1..to_op.len() - 1];
                 let mut slice: Vec<Option<Token>> = slice.iter().map(|t| t.to_owned()).collect();
                 let exp_nodes = get_exp_node(&mut slice);
-                let node = AstNode::new(AstNodeType::Exp(exp_nodes));
+                let node = AstNode::Exp(exp_nodes);
                 res.push(Box::new(node));
             } else {
                 let node_option = get_ast_node(&mut to_op);
@@ -475,19 +472,19 @@ pub fn flatten_exp<'a>(
     res
 }
 
-pub fn create_bang_bool<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
+pub fn create_bang_bool<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a> {
     tokens.remove(0);
 
     let ast_node = get_ast_node(tokens);
 
     if let Some(node) = ast_node {
-        AstNodeType::Bang(Box::new(node))
+        AstNode::Bang(Box::new(node))
     } else {
         panic!("Expected value to !");
     }
 }
 
-fn create_arr_with_tokens<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
+fn create_arr_with_tokens<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a> {
     let mut node_tokens = tokens_to_delimiter(tokens, 0, ",");
     let mut i = node_tokens.len() + 1;
 
@@ -504,19 +501,19 @@ fn create_arr_with_tokens<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeTyp
         i += node_tokens.len() + 1;
     }
 
-    let res = AstNodeType::Array(arr_values);
+    let res = AstNode::Array(arr_values);
 
     res
 }
 
-pub fn create_arr<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
+pub fn create_arr<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a> {
     let mut new_tokens: Vec<Option<Token>> = Vec::new();
     for i in 1..tokens.len() - 1 {
         new_tokens.push(Some(tokens[i].take().unwrap()));
     }
 
     if new_tokens.len() == 0 {
-        return AstNodeType::Array(vec![]);
+        return AstNode::Array(vec![]);
     }
 
     match new_tokens[0].as_ref().unwrap() {
@@ -642,7 +639,7 @@ pub fn get_array_type(values: &Vec<Value>) -> VarType {
     }
 }
 
-pub fn create_cast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<'a> {
+pub fn create_cast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a> {
     let mut node_tokens = tokens_to_delimiter(tokens, 2, ")");
     let node_option = get_ast_node(&mut node_tokens);
 
@@ -652,7 +649,7 @@ pub fn create_cast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNodeType<
     };
 
     if let Some(node) = node_option {
-        AstNodeType::Cast(VarType::from(to_type), Box::new(node))
+        AstNode::Cast(VarType::from(to_type), Box::new(node))
     } else {
         panic!("")
     }
@@ -895,7 +892,7 @@ pub fn is_sequence(tokens: &mut Vec<Option<Token>>) -> bool {
     open_brackets == 0 && semicolons > 0
 }
 
-pub fn create_comp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNodeType<'a>> {
+pub fn create_comp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNode<'a>> {
     // TODO
     // check for cases like this: if ((i < 10)) { ... }
     // should be treated like: if (i < 10) { ... }
@@ -935,7 +932,7 @@ pub fn create_comp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNo
                 }
 
                 if let Some(right_node) = get_ast_node(&mut temp_tokens) {
-                    return Some(AstNodeType::Comparison(
+                    return Some(AstNode::Comparison(
                         tokens[i].take().unwrap(),
                         Box::new(left_node),
                         Box::new(right_node),
