@@ -73,6 +73,28 @@ impl Value {
             Value::Array(arr) => get_value_arr_str(arr),
         }
     }
+    pub fn get_enum_str(&self) -> String {
+        match self {
+            Value::Int(_) => String::from("int"),
+            Value::Usize(_) => String::from("usize"),
+            Value::Float(_) => String::from("float"),
+            Value::Double(_) => String::from("double"),
+            Value::Long(_) => String::from("long"),
+            Value::String(_) => String::from("string"),
+            Value::Bool(_) => String::from("bool"),
+            Value::Array(arr) => {
+                let mut arr_type = if arr.len() > 0 {
+                    arr[0].get_enum_str()
+                } else {
+                    String::from("unknown")
+                };
+
+                arr_type.push_str("[]");
+
+                arr_type
+            }
+        }
+    }
 }
 
 #[derive(Clone, Debug)]

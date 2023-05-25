@@ -952,91 +952,36 @@ pub fn create_comp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNo
     None
 }
 
-macro_rules! comp {
-    ($l:expr, $r:expr, $c:tt) => {
-        match $l {
-            Value::Usize(l) => match $r {
-                Value::Usize(r) => l $c r,
-                Value::String(_) => panic!("Cannot compare usize to string"),
-                Value::Int(_) => panic!("Cannot compare usize to int"),
-                Value::Float(_) => panic!("Cannot compare usize to float"),
-                Value::Double(_) => panic!("Cannot compare usize to double"),
-                Value::Long(_) => panic!("Cannot compare usize to long"),
-                Value::Bool(_) => panic!("Cannot compare usize to bool"),
-                Value::Array(_) => panic!("Cannot compare usize to array"),
-            },
-            Value::String(l) => match $r {
-                Value::Usize(_) => panic!("Cannot compare string to usize"),
-                Value::String(r) => l $c r,
-                Value::Int(_) => panic!("Cannot compare string to int"),
-                Value::Float(_) => panic!("Cannot compare string to float"),
-                Value::Double(_) => panic!("Cannot compare string to double"),
-                Value::Long(_) => panic!("Cannot compare string to long"),
-                Value::Bool(_) => panic!("Cannot compare string to bool"),
-                Value::Array(_) => panic!("Cannot compare string to array"),
-            },
-            Value::Int(l) => match $r {
-                Value::Usize(_) => panic!("Cannot compare int to usize"),
-                Value::String(_) => panic!("Cannot compare int to string"),
-                Value::Int(r) => l $c r,
-                Value::Float(_) => panic!("Cannot compare int to float"),
-                Value::Double(_) => panic!("Cannot compare int to double"),
-                Value::Long(_) => panic!("Cannot compare int to long"),
-                Value::Bool(_) => panic!("Cannot compare int to bool"),
-                Value::Array(_) => panic!("Cannot compare int to array"),
-            },
-            Value::Float(l) => match $r {
-                Value::Usize(_) => panic!("Cannot compare float to usize"),
-                Value::String(_) => panic!("Cannot compare float to string"),
-                Value::Int(_) => panic!("Cannot compare float to int"),
-                Value::Float(r) => l $c r,
-                Value::Double(_) => panic!("Cannot compare float to double"),
-                Value::Long(_) => panic!("Cannot compare float to long"),
-                Value::Bool(_) => panic!("Cannot compare float to bool"),
-                Value::Array(_) => panic!("Cannot compare float to array"),
-            },
-            Value::Double(l) => match $r {
-                Value::Usize(_) => panic!("Cannot compare double to usize"),
-                Value::String(_) => panic!("Cannot compare double to string"),
-                Value::Int(_) => panic!("Cannot compare double to int"),
-                Value::Float(_) => panic!("Cannot compare double to float"),
-                Value::Double(r) => l $c r,
-                Value::Long(_) => panic!("Cannot compare double to long"),
-                Value::Bool(_) => panic!("Cannot compare double to bool"),
-                Value::Array(_) => panic!("Cannot compare double to array"),
-            },
-            Value::Long(l) => match $r {
-                Value::Usize(_) => panic!("Cannot compare long to usize"),
-                Value::String(_) => panic!("Cannot compare long to string"),
-                Value::Int(_) => panic!("Cannot compare long to int"),
-                Value::Float(_) => panic!("Cannot compare long to float"),
-                Value::Double(_) => panic!("Cannot compare long to double"),
-                Value::Long(r) => l $c r,
-                Value::Bool(_) => panic!("Cannot compare long to bool"),
-                Value::Array(_) => panic!("Cannot compare long to array"),
-            },
-            Value::Bool(l) => match $r {
-                Value::Usize(_) => panic!("Cannot compare bool to usize"),
-                Value::String(_) => panic!("Cannot compare bool to string"),
-                Value::Int(_) => panic!("Cannot compare bool to int"),
-                Value::Float(_) => panic!("Cannot compare bool to float"),
-                Value::Double(_) => panic!("Cannot compare bool to double"),
-                Value::Long(_) => panic!("Cannot compare bool to long"),
-                Value::Bool(r) => l $c r,
-                Value::Array(_) => panic!("Cannot compare bool to array"),
-            },
-            Value::Array(l) => match $r {
-                Value::Usize(_) => panic!("Cannot compare array to usize"),
-                Value::String(_) => panic!("Cannot compare array to string"),
-                Value::Int(_) => panic!("Cannot compare array to int"),
-                Value::Float(_) => panic!("Cannot compare array to float"),
-                Value::Double(_) => panic!("Cannot compare array to double"),
-                Value::Long(_) => panic!("Cannot compare array to long"),
-                Value::Bool(_) => panic!("Cannot compare array to bool"),
-                Value::Array(r) => {
-                    compare_array(l, r, $r)
+macro_rules! temp_comp {
+    ($left:expr, $right:expr, ==, $($variants:ident),*) => {
+        {
+            match $left {
+                $(
+                    Value::$variants(l) => match $right {
+                        Value::$variants(r) => l == r,
+                        Value::Array(_) => panic!("Cannot compare arrays"),
+                        _ => panic!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str())
+                    }
+                )*
+                Value::Array(left_arr) => match $right {
+                    Value::Array(right_arr) => compare_array(left_arr, right_arr, $right),
+                    _ => panic!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str())
                 }
-            },
+            }
+        }
+    };
+    ($left:expr, $right:expr, $c:tt, $($variants:ident),*) => {
+        {
+            match $left {
+                $(
+                    Value::$variants(l) => match $right {
+                        Value::$variants(r) => l $c r,
+                        Value::Array(_) => panic!("Cannot compare arrays"),
+                        _ => panic!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str())
+                    }
+                )*
+                Value::Array(_) => panic!("Arrays can only be compared with `==` operator"),
+            }
         }
     };
 }
@@ -1049,7 +994,7 @@ fn compare_array(left: &Vec<Value>, right: &Vec<Value>, right_val: &Value) -> bo
         }
 
         for i in 0..left.len() {
-            if !comp!(&left[i], &right[i], ==) {
+            if !temp_comp!(&left[i], &right[i], ==, Usize, String, Int, Float, Double, Long, Bool) {
                 return false;
             }
         }
@@ -1060,15 +1005,21 @@ fn compare_array(left: &Vec<Value>, right: &Vec<Value>, right_val: &Value) -> bo
     }
 }
 
+macro_rules! comp_bind {
+    ($left:expr, $right:expr, $tok:tt) => {
+        temp_comp!($left, $right, $tok, Usize, String, Int, Float, Double, Long, Bool)
+    };
+}
+
 macro_rules! comp_match {
     ($tok:ident, $left:expr, $right:expr) => {
         match $tok {
-            Token::EqCompare => comp!($left, $right, ==),
-            Token::EqNCompare => comp!($left, $right, !=),
-            Token::LAngle => comp!($left, $right, <),
-            Token::RAngle => comp!($left, $right, >),
-            Token::LAngleEq => comp!($left, $right, <=),
-            Token::RAngleEq => comp!($left, $right, >=),
+            Token::EqCompare => comp_bind!($left, $right, ==),
+            Token::EqNCompare => comp_bind!($left, $right, !=),
+            Token::LAngle => comp_bind!($left, $right, <),
+            Token::RAngle => comp_bind!($left, $right, >),
+            Token::LAngleEq => comp_bind!($left, $right, <=),
+            Token::RAngleEq => comp_bind!($left, $right, >=),
             _ => panic!("Expected comparison operator"),
         }
     }
