@@ -952,7 +952,7 @@ pub fn create_comp_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNo
     None
 }
 
-macro_rules! temp_comp {
+macro_rules! comp {
     ($left:expr, $right:expr, ==, $($variants:ident),*) => {
         {
             match $left {
@@ -994,7 +994,7 @@ fn compare_array(left: &Vec<Value>, right: &Vec<Value>, right_val: &Value) -> bo
         }
 
         for i in 0..left.len() {
-            if !temp_comp!(&left[i], &right[i], ==, Usize, String, Int, Float, Double, Long, Bool) {
+            if !comp!(&left[i], &right[i], ==, Usize, String, Int, Float, Double, Long, Bool) {
                 return false;
             }
         }
@@ -1007,7 +1007,7 @@ fn compare_array(left: &Vec<Value>, right: &Vec<Value>, right_val: &Value) -> bo
 
 macro_rules! comp_bind {
     ($left:expr, $right:expr, $tok:tt) => {
-        temp_comp!($left, $right, $tok, Usize, String, Int, Float, Double, Long, Bool)
+        comp!($left, $right, $tok, Usize, String, Int, Float, Double, Long, Bool)
     };
 }
 
