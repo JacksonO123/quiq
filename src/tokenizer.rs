@@ -84,6 +84,16 @@ impl<'a> Token<'a> {
             Token::RAngleEq => ">=",
         }
     }
+    pub fn get_token_name(&self) -> &str {
+        match self {
+            Token::Number(_) => "Number",
+            Token::String(_) => "String",
+            Token::Bool(_) => "Bool",
+            Token::Keyword(_) => "Keyword",
+            Token::Identifier(_) => "Identifier",
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn get_full_token<'a>(chars: &Vec<char>, start: usize) -> String {

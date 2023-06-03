@@ -26,7 +26,7 @@ pub struct BuiltinFunc<'a> {
         &mut HashMap<String, Rc<RefCell<VarValue>>>,
         Vec<EvalValue>,
         &mut Stdout,
-    ) -> Option<Vec<Value>>,
+    ) -> Option<Value>,
 }
 impl<'a> BuiltinFunc<'a> {
     pub fn new(
@@ -35,7 +35,7 @@ impl<'a> BuiltinFunc<'a> {
             &mut HashMap<String, Rc<RefCell<VarValue>>>,
             Vec<EvalValue>,
             &mut Stdout,
-        ) -> Option<Vec<Value>>,
+        ) -> Option<Value>,
     ) -> Self {
         Self { name, func }
     }
@@ -165,8 +165,7 @@ fn call_func<'a>(
     name: &String,
     args: &Vec<AstNode<'a>>,
     stdout: &mut Stdout,
-) -> Option<Token<'a>> {
-    let mut found = false;
+) -> Option<Value> {
     for func in functions.borrow().iter() {
         match func {
             Func::Custom(custom) => {
@@ -176,7 +175,6 @@ fn call_func<'a>(
             }
             Func::Builtin(builtin) => {
                 if builtin.name == name {
-                    found = true;
                     let f = builtin.func;
                     let args = args.iter().map(|a| {
                         let res = eval_node(vars, Rc::clone(&functions), scope, a, stdout);
@@ -187,23 +185,39 @@ fn call_func<'a>(
                         }
                     });
                     let args: Vec<EvalValue> = args.collect();
-                    f(vars, args, stdout);
+                    return f(vars, args, stdout);
                 }
             }
         }
     }
 
-    if !found {
-        panic!("Unknown function: {}", name);
-    }
-
-    None
+    panic!("Unknown function: {}", name);
 }
 
 #[derive(Debug, Clone)]
 pub enum EvalValue<'a> {
     Value(Value),
     Token(Token<'a>),
+}
+
+macro_rules! expr {
+    ($left:expr, $right:expr, $ch:tt, $($variants:ident),+) => {
+        match $left {
+            $(
+                Value::$variants(l) => match $right {
+                    Value::$variants(r) => Some(Value::$variants(l $ch r)),
+                    _ => panic!("Cannot {} values of types {:?} and {:?}", stringify!($ch), $left, $right)
+                }
+            )*
+            _ => panic!("Cannot {} values of types {:?} and {:?}", stringify!($ch), $left, $right)
+        }
+    };
+}
+
+macro_rules! expr_abstracted {
+    ($left:expr, $right:expr, $ch:tt) => {
+        expr!($left, $right, $ch, Int, Float, Double, Long, Usize)
+    };
 }
 
 pub fn eval_exp<'a>(
@@ -242,118 +256,22 @@ pub fn eval_exp<'a>(
                             };
 
                             let new_value = match current_op {
-                                OperatorType::Mult => {
-                                    match op_type {
-                                        OperatorType::Mult => match left {
-                                            Value::Int(l) => match right {
-                                                Value::Int(r) => Some(Value::Int(l * r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
-                                            },
-                                            Value::Float(l) => match right {
-                                                Value::Float(r) => Some(Value::Float(l * r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
-                                            },
-                                            Value::Double(l) => match right {
-                                                Value::Double(r) => Some(Value::Double(l * r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
-                                            },
-                                            Value::Long(l) => match right {
-                                                Value::Long(r) => Some(Value::Long(l * r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
-                                            },
-                                            Value::Usize(l) => match right {
-                                                Value::Usize(r) => Some(Value::Usize(l * r)),
-                                                _ => panic!("Cannot multiply non-number values, or numbers of different types"),
-                                            }
-                                            _ => panic!("Cannot multiply non-number values, or numbers of different types"),
-                                        }
-                                        _ => None
-                                    }
-                                }
-                                OperatorType::Div => {
-                                    match op_type {
-                                        OperatorType::Div => match left {
-                                            Value::Int(l) => match right {
-                                                Value::Int(r) => Some(Value::Int(l / r)),
-                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
-                                            },
-                                            Value::Float(l) => match right {
-                                                Value::Float(r) => Some(Value::Float(l / r)),
-                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
-                                            },
-                                            Value::Double(l) => match right {
-                                                Value::Double(r) => Some(Value::Double(l / r)),
-                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
-                                            },
-                                            Value::Long(l) => match right {
-                                                Value::Long(r) => Some(Value::Long(l / r)),
-                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
-                                            },
-                                            Value::Usize(l) => match right {
-                                                Value::Usize(r) => Some(Value::Usize(l / r)),
-                                                _ => panic!("Cannot divide non-number values, or numbers of different types"),
-                                            }
-                                            _ => panic!("Cannot divide non-number values, or numbers of different types"),
-                                        }
-                                        _ => None
-                                    }
-                                }
-                                OperatorType::Add => {
-                                    match op_type {
-                                        OperatorType::Add => match left {
-                                            Value::Int(l) => match right {
-                                                Value::Int(r) => Some(Value::Int(l + r)),
-                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
-                                            },
-                                            Value::Float(l) => match right {
-                                                Value::Float(r) => Some(Value::Float(l + r)),
-                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
-                                            },
-                                            Value::Double(l) => match right {
-                                                Value::Double(r) => Some(Value::Double(l + r)),
-                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
-                                            },
-                                            Value::Long(l) => match right {
-                                                Value::Long(r) => Some(Value::Long(l + r)),
-                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
-                                            },
-                                            Value::Usize(l) => match right {
-                                                Value::Usize(r) => Some(Value::Usize(l + r)),
-                                                _ => panic!("Cannot add non-number values, or numbers of different types"),
-                                            }
-                                            _ => panic!("Cannot add non-number values, or numbers of different types"),
-                                        }
-                                        _ => None
-                                    }
-                                }
-                                OperatorType::Sub => {
-                                    match op_type {
-                                        OperatorType::Sub => match left {
-                                            Value::Int(l) => match right {
-                                                Value::Int(r) => Some(Value::Int(l - r)),
-                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
-                                            },
-                                            Value::Float(l) => match right {
-                                                Value::Float(r) => Some(Value::Float(l - r)),
-                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
-                                            },
-                                            Value::Double(l) => match right {
-                                                Value::Double(r) => Some(Value::Double(l - r)),
-                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
-                                            },
-                                            Value::Long(l) => match right {
-                                                Value::Long(r) => Some(Value::Long(l - r)),
-                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
-                                            },
-                                            Value::Usize(l) => match right {
-                                                Value::Usize(r) => Some(Value::Usize(l - r)),
-                                                _ => panic!("Cannot subtract non-number values, or numbers of different types"),
-                                            }
-                                            _ => panic!("Cannot subtract non-number values, or numbers of different types"),
-                                        }
-                                        _ => None
-                                    }
-                                }
+                                OperatorType::Mult => match op_type {
+                                    OperatorType::Mult => expr_abstracted!(left, right, *),
+                                    _ => None,
+                                },
+                                OperatorType::Div => match op_type {
+                                    OperatorType::Div => expr_abstracted!(left, right, /),
+                                    _ => None,
+                                },
+                                OperatorType::Add => match op_type {
+                                    OperatorType::Add => expr_abstracted!(left, right, +),
+                                    _ => None,
+                                },
+                                OperatorType::Sub => match op_type {
+                                    OperatorType::Sub => expr_abstracted!(left, right, -),
+                                    _ => None,
+                                },
                             };
 
                             if let Some(val) = new_value {
@@ -719,7 +637,7 @@ pub fn eval_node<'a>(
         AstNode::CallFunc(name, args) => {
             let func_res = call_func(vars, functions, scope, name, args, stdout);
             if let Some(tok) = func_res {
-                Some(EvalValue::Token(tok))
+                Some(EvalValue::Value(tok))
             } else {
                 None
             }
