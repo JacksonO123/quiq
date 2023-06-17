@@ -1,4 +1,4 @@
-use std::{cell::RefCell, rc::Rc};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
     helpers::{
@@ -6,9 +6,31 @@ use crate::{
         create_keyword_node, create_make_var_node, create_set_var_node, get_exp_node,
         get_struct_access_tokens, is_exp, is_sequence, tokens_to_delimiter,
     },
-    interpreter::VarType,
+    interpreter::{StructInfo, StructProp, VarType},
     tokenizer::Token,
 };
+
+#[derive(Debug, Clone)]
+pub enum StructShapeProp {
+    Ident(String),
+    Type(VarType),
+    Array(Box<StructShapeProp>),
+}
+
+#[derive(Debug, Clone)]
+pub struct StructShape {
+    pub props: HashMap<String, StructShapeProp>,
+}
+impl StructShape {
+    pub fn new() -> Self {
+        Self {
+            props: HashMap::new(),
+        }
+    }
+    pub fn add(&mut self, name: String, prop_type: StructShapeProp) {
+        self.props.insert(name.to_owned(), prop_type);
+    }
+}
 
 pub fn get_value_arr_str(values: &Vec<Value>) -> String {
     let mut res = String::from("[");
@@ -56,6 +78,8 @@ pub enum Value {
     Long(i64),
     Bool(bool),
     Array(Vec<Value>),
+    /// shape, props
+    Struct(StructShape, Vec<StructProp>),
 }
 impl Value {
     pub fn get_str(&self) -> String {
@@ -71,6 +95,17 @@ impl Value {
                 res.to_string()
             }
             Value::Array(arr) => get_value_arr_str(arr),
+            Value::Struct(_, props) => {
+                let mut res = String::from("{");
+
+                for prop in props.iter() {
+                    res.push_str(prop.get_str().as_str());
+                }
+
+                res.push_str("\n}");
+
+                res
+            }
         }
     }
     pub fn get_enum_str(&self) -> String {
@@ -82,6 +117,7 @@ impl Value {
             Value::Long(_) => String::from("long"),
             Value::String(_) => String::from("string"),
             Value::Bool(_) => String::from("bool"),
+            Value::Struct(_, _) => String::from("struct"),
             Value::Array(arr) => {
                 let mut arr_type = if arr.len() > 0 {
                     arr[0].get_enum_str()
@@ -98,41 +134,44 @@ impl Value {
 }
 
 #[derive(Clone, Debug)]
-pub enum AstNode<'a> {
-    StatementSeq(Vec<Rc<RefCell<AstNode<'a>>>>),
+pub enum AstNode {
+    StatementSeq(Vec<Rc<RefCell<AstNode>>>),
     /// type, name, value node
-    MakeVar(VarType, Token<'a>, Box<AstNode<'a>>),
-    SetVar(Token<'a>, Box<AstNode<'a>>),
-    Token(Token<'a>),
-    CallFunc(String, Vec<AstNode<'a>>),
-    Bang(Box<AstNode<'a>>),
-    Exp(Vec<Box<AstNode<'a>>>),
-    If(Box<AstNode<'a>>, Box<AstNode<'a>>),
-    Array(Vec<AstNode<'a>>),
-    AccessStructProp(Token<'a>, Vec<AstNode<'a>>),
+    MakeVar(VarType, Token, Box<AstNode>),
+    SetVar(Token, Box<AstNode>),
+    Token(Token),
+    CallFunc(String, Vec<AstNode>),
+    Bang(Box<AstNode>),
+    Exp(Vec<Box<AstNode>>),
+    If(Box<AstNode>, Box<AstNode>),
+    Array(Vec<AstNode>),
+    AccessStructProp(Token, Vec<AstNode>),
     /// to, node
-    Cast(VarType, Box<AstNode<'a>>),
+    Cast(VarType, Box<AstNode>),
     /// operator, left, right
-    Comparison(Token<'a>, Box<AstNode<'a>>, Box<AstNode<'a>>),
+    Comparison(Token, Box<AstNode>, Box<AstNode>),
     /// ident, from, to, inc, node
     ForFromTo(
-        Token<'a>,
-        Box<AstNode<'a>>,
-        Box<AstNode<'a>>,
-        Option<Box<AstNode<'a>>>,
-        Box<AstNode<'a>>,
+        Token,
+        Box<AstNode>,
+        Box<AstNode>,
+        Option<Box<AstNode>>,
+        Box<AstNode>,
     ),
-    IndexArr(Token<'a>, Box<AstNode<'a>>),
+    IndexArr(Token, Box<AstNode>),
     /// arr ident, index, value
-    SetArrIndex(Token<'a>, Box<AstNode<'a>>, Box<AstNode<'a>>),
+    SetArrIndex(Token, Box<AstNode>, Box<AstNode>),
+    /// name, shape
+    DefineStruct(String, StructShape),
 }
 
-impl<'a> AstNode<'a> {
-    pub fn new_ptr(node: AstNode<'a>) -> Rc<RefCell<Self>> {
+impl AstNode {
+    pub fn new_ptr(node: AstNode) -> Rc<RefCell<Self>> {
         Rc::new(RefCell::new(node))
     }
     pub fn get_str(&self) -> String {
         match &self {
+            AstNode::DefineStruct(name, shape) => unimplemented!(),
             AstNode::SetArrIndex(arr, index, value) => {
                 format!(
                     "setting {} to {} at {}",
@@ -225,24 +264,27 @@ impl<'a> AstNode<'a> {
     }
 }
 
-pub struct Ast<'a> {
-    pub node: Rc<RefCell<AstNode<'a>>>,
+pub struct Ast {
+    pub node: Rc<RefCell<AstNode>>,
 }
-impl<'a> Ast<'a> {
+impl Ast {
     fn new() -> Self {
         let node = AstNode::new_ptr(AstNode::StatementSeq(vec![]));
         Self { node }
     }
 }
 
-pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNode<'a>> {
+pub fn get_ast_node<'a>(
+    structs: &mut StructInfo,
+    tokens: &mut Vec<Option<Token>>,
+) -> Option<AstNode> {
     if tokens.len() == 0 {
         None
     } else if tokens.len() == 1 {
         Some(AstNode::Token(tokens[0].take().unwrap()))
     } else {
         if is_sequence(tokens) {
-            let sequence_node = generate_sequence_node(tokens);
+            let sequence_node = generate_sequence_node(structs, tokens);
             return Some(sequence_node);
         }
 
@@ -269,23 +311,23 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNode<'
             tokens.remove(0);
         }
 
-        if let Some(comp_node) = create_comp_node(tokens) {
+        if let Some(comp_node) = create_comp_node(structs, tokens) {
             return Some(comp_node);
         }
 
         if is_exp(tokens) {
-            let exp_nodes = get_exp_node(tokens);
+            let exp_nodes = get_exp_node(structs, tokens);
             return Some(AstNode::Exp(exp_nodes));
         }
 
         let node_type = match tokens[0].as_ref().unwrap() {
             Token::Type(_) => match tokens[1].as_ref().unwrap() {
-                Token::LParen => Some(create_cast_node(tokens)),
-                _ => Some(create_make_var_node(tokens)),
+                Token::LParen => Some(create_cast_node(structs, tokens)),
+                _ => Some(create_make_var_node(structs, tokens)),
             },
-            Token::Identifier(_) => match tokens[1].as_ref().unwrap() {
-                Token::LParen => Some(create_func_call_node(tokens)),
-                Token::EqSet => Some(create_set_var_node(tokens)),
+            Token::Identifier(ident) => match tokens[1].as_ref().unwrap() {
+                Token::LParen => Some(create_func_call_node(structs, tokens)),
+                Token::EqSet => Some(create_set_var_node(structs, tokens)),
                 Token::Period => {
                     let struct_token = tokens[0].take().unwrap();
                     tokens.remove(0);
@@ -294,7 +336,7 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNode<'
                     let mut access_token_nodes: Vec<AstNode> = Vec::new();
                     let mut tokens_clone = get_struct_access_tokens(tokens);
                     for token_clone in tokens_clone.iter_mut() {
-                        let res = get_ast_node(token_clone).unwrap();
+                        let res = get_ast_node(structs, token_clone).unwrap();
                         access_token_nodes.push(res);
                     }
                     Some(AstNode::AccessStructProp(struct_token, access_token_nodes))
@@ -303,69 +345,58 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNode<'
                     let mut index_tokens = tokens_to_delimiter(tokens, 2, "]");
                     let arr_index_end = 3 + index_tokens.len();
 
-                    Some(if let Some(index_node) = get_ast_node(&mut index_tokens) {
-                        tokens.drain(1..arr_index_end);
+                    Some(
+                        if let Some(index_node) = get_ast_node(structs, &mut index_tokens) {
+                            tokens.drain(1..arr_index_end);
 
-                        if let Token::Semicolon = tokens.last().as_ref().unwrap().as_ref().unwrap()
-                        {
-                            tokens.remove(tokens.len() - 1);
-                        }
+                            if let Token::Semicolon =
+                                tokens.last().as_ref().unwrap().as_ref().unwrap()
+                            {
+                                tokens.remove(tokens.len() - 1);
+                            }
 
-                        if tokens.len() > 1 {
-                            match tokens[1].as_ref().unwrap() {
-                                Token::EqSet => {
-                                    let arr_var_name = tokens.remove(0);
-                                    tokens.remove(0);
+                            if tokens.len() > 1 {
+                                match tokens[1].as_ref().unwrap() {
+                                    Token::EqSet => {
+                                        let arr_var_name = tokens.remove(0);
+                                        tokens.remove(0);
 
-                                    if let Some(value_node) = get_ast_node(tokens) {
-                                        AstNode::SetArrIndex(
-                                            arr_var_name.unwrap(),
-                                            Box::new(index_node),
-                                            Box::new(value_node),
-                                        )
-                                    } else {
-                                        panic!("expected value to set at index");
+                                        if let Some(value_node) = get_ast_node(structs, tokens) {
+                                            AstNode::SetArrIndex(
+                                                arr_var_name.unwrap(),
+                                                Box::new(index_node),
+                                                Box::new(value_node),
+                                            )
+                                        } else {
+                                            panic!("expected value to set at index");
+                                        }
                                     }
+                                    _ => unimplemented!(),
                                 }
-                                _ => unimplemented!(),
+                            } else {
+                                AstNode::IndexArr(tokens[0].take().unwrap(), Box::new(index_node))
                             }
                         } else {
-                            AstNode::IndexArr(tokens[0].take().unwrap(), Box::new(index_node))
-                        }
-                    } else {
-                        panic!("Expected value to index array with");
-                    })
-
-                    // let (res, num) = create_index_arr_node(tokens);
-                    // tokens.drain(0..num);
-
-                    // // 1 because of semicolon at end
-                    // let num = if let Token::Semicolon =
-                    //     tokens.last().as_ref().unwrap().as_ref().unwrap()
-                    // {
-                    //     1
-                    // } else {
-                    //     0
-                    // };
-                    // if tokens.len() > num {
-                    //     match tokens[0].as_ref().unwrap() {
-                    //         Token::EqSet => {
-                    //             println!("setting");
-                    //         }
-                    //         _ => unreachable!(),
-                    //     }
-                    //     return None;
-                    // }
-
-                    // Some(res)
+                            panic!("Expected value to index array with");
+                        },
+                    )
                 }
-                _ => unimplemented!(),
+                _ => {
+                    println!("{:?}", structs.available_structs);
+                    let pos = structs.available_structs.iter().position(|s| s == ident);
+                    if pos.is_some() {
+                        // handle create struct variable
+                    } else {
+                        // do smth else
+                    }
+                    unimplemented!()
+                }
             },
             Token::NewLine => None,
-            Token::Bang => Some(create_bang_bool(tokens)),
+            Token::Bang => Some(create_bang_bool(structs, tokens)),
             Token::String(_) => Some(AstNode::Token(tokens[0].take().unwrap())),
-            Token::Keyword(keyword) => Some(create_keyword_node(tokens, keyword)),
-            Token::LBracket => Some(create_arr(tokens)),
+            Token::Keyword(keyword) => Some(create_keyword_node(tokens, structs, keyword.clone())),
+            Token::LBracket => Some(create_arr(structs, tokens)),
             _ => {
                 panic!("Token not implemented: {:?}", tokens)
             }
@@ -379,10 +410,7 @@ pub fn get_ast_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Option<AstNode<'
     }
 }
 
-fn get_sequence_slice<'a>(
-    tokens: &mut Vec<Option<Token<'a>>>,
-    start: usize,
-) -> Vec<Option<Token<'a>>> {
+fn get_sequence_slice<'a>(tokens: &mut Vec<Option<Token>>, start: usize) -> Vec<Option<Token>> {
     let mut slice = Vec::new();
     let mut open_parens = 0;
 
@@ -426,7 +454,7 @@ fn get_sequence_slice<'a>(
     slice
 }
 
-fn generate_sequence_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a> {
+fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> AstNode {
     let mut seq: Vec<Rc<RefCell<AstNode>>> = Vec::new();
 
     let mut i = 0;
@@ -442,7 +470,7 @@ fn generate_sequence_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a
         let mut token_slice = get_sequence_slice(tokens, i);
         let token_num = token_slice.len();
 
-        let node_option = get_ast_node(&mut token_slice);
+        let node_option = get_ast_node(structs, &mut token_slice);
         if let Some(node) = node_option {
             let ptr = Rc::new(RefCell::new(node));
             seq.push(ptr);
@@ -453,10 +481,10 @@ fn generate_sequence_node<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> AstNode<'a
     AstNode::StatementSeq(seq)
 }
 
-pub fn generate_tree<'a>(tokens: &mut Vec<Option<Token<'a>>>) -> Ast<'a> {
+pub fn generate_tree<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Ast {
     let mut tree = Ast::new();
 
-    let node_option = get_ast_node(tokens);
+    let node_option = get_ast_node(structs, tokens);
     if let Some(node) = node_option {
         tree.node = Rc::new(RefCell::new(node));
     }

@@ -12,6 +12,8 @@ use std::rc::Rc;
 use std::time::Instant;
 use std::{env::args, fs};
 
+use interpreter::StructInfo;
+
 use crate::ast::generate_tree;
 use crate::builtins::init_builtins;
 use crate::interpreter::{eval, VarValue};
@@ -36,12 +38,13 @@ fn main() {
     let mut tokens = tokenize(file.as_str());
     let tokens_end = tokens_start.elapsed();
 
+    let mut struct_info = StructInfo::new();
+
     let tree_start = Instant::now();
-    let tree = generate_tree(&mut tokens);
+    let tree = generate_tree(&mut struct_info, &mut tokens);
     let tree_end = tree_start.elapsed();
     // tree.print();
 
-    // let mut vars: Vec<Rc<RefCell<VarValue>>> = Vec::new();
     let mut vars: HashMap<String, Rc<RefCell<VarValue>>> = HashMap::new();
     let functions = Rc::new(RefCell::new(Vec::new()));
 
@@ -50,7 +53,7 @@ fn main() {
     let mut stdout = io::stdout();
 
     let eval_start = Instant::now();
-    eval(&mut vars, functions, tree, &mut stdout);
+    eval(&mut vars, functions, &mut struct_info, tree, &mut stdout);
     let eval_end = eval_start.elapsed();
 
     let end = start.elapsed();

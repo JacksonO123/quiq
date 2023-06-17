@@ -8,10 +8,12 @@ This time written in rust
 
 - [x] Comparisons
 - [x] For loop
+- [ ] Structs
+  - [ ] Account for array property types
 - [ ] Add ref as a value type (basically a pointer) (not sure when this should be added (not v important rn))
 - [ ] While loops
 - [ ] Functions
-- [ ] Structs
+- [ ] Garbage collector
 
 ## Features
 

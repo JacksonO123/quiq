@@ -18,13 +18,33 @@ impl OperatorType {
     }
 }
 
+#[derive(Clone, Debug)]
+pub enum Keyword {
+    If,
+    Else,
+    For,
+    While,
+    Struct,
+}
+impl Keyword {
+    pub fn get_str(&self) -> &str {
+        match self {
+            Keyword::If => "if",
+            Keyword::Else => "else",
+            Keyword::While => "while",
+            Keyword::For => "for",
+            Keyword::Struct => "struct",
+        }
+    }
+}
+
 #[derive(Debug, Clone)]
-pub enum Token<'a> {
+pub enum Token {
     Type(VarType),
     Number(String),
     String(String),
     Bool(bool),
-    Keyword(&'a str),
+    Keyword(Keyword),
     Identifier(String),
     Operator(OperatorType),
     RParen,
@@ -37,6 +57,7 @@ pub enum Token<'a> {
     EqNCompare,
     EqSet,
     Semicolon,
+    Colon,
     NewLine,
     Comment,
     Bang,
@@ -47,7 +68,7 @@ pub enum Token<'a> {
     LAngleEq,
     RAngleEq,
 }
-impl<'a> Token<'a> {
+impl Token {
     pub fn get_str(&self) -> &str {
         match self {
             Token::Type(var_type) => &var_type.get_str(),
@@ -60,9 +81,10 @@ impl<'a> Token<'a> {
                     "false"
                 }
             }
-            Token::Keyword(k) => k,
+            Token::Keyword(k) => k.get_str(),
             Token::Identifier(ident) => ident,
             Token::Operator(op_type) => op_type.get_str(),
+            Token::Colon => ":",
             Token::RParen => ")",
             Token::LParen => "(",
             Token::RBrace => "}",
@@ -177,10 +199,11 @@ pub fn tokenize(code: &str) -> Vec<Option<Token>> {
                 "string" => Token::Type(VarType::String),
                 "usize" => Token::Type(VarType::Usize),
                 // keywords (add more)
-                "if" => Token::Keyword("if"),
-                "else" => Token::Keyword("else"),
-                "for" => Token::Keyword("for"),
-                "while" => Token::Keyword("while"),
+                "if" => Token::Keyword(Keyword::If),
+                "else" => Token::Keyword(Keyword::Else),
+                "for" => Token::Keyword(Keyword::For),
+                "while" => Token::Keyword(Keyword::While),
+                "struct" => Token::Keyword(Keyword::Struct),
                 // booleans
                 "true" => Token::Bool(true),
                 "false" => Token::Bool(false),
@@ -247,6 +270,8 @@ pub fn tokenize(code: &str) -> Vec<Option<Token>> {
             token = Token::Comma;
         } else if chars[i] == '.' {
             token = Token::Period;
+        } else if chars[i] == ':' {
+            token = Token::Colon;
         } else if chars[i] == ';' {
             token = Token::Semicolon;
         } else if chars[i] == '=' {

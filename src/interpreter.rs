@@ -1,13 +1,40 @@
 use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 
 use crate::{
-    ast::{Ast, AstNode, Value},
+    ast::{Ast, AstNode, StructShape, Value},
     helpers::{
         cast, compare, flatten_exp, get_eval_value, index_arr, make_var, push_to_array,
         set_index_arr, set_var_value, ExpValue,
     },
     tokenizer::{OperatorType, Token},
 };
+
+pub struct StructInfo {
+    pub available_structs: Vec<String>,
+    pub structs: Vec<VarValue>,
+}
+impl StructInfo {
+    pub fn new() -> Self {
+        Self {
+            available_structs: vec![],
+            structs: vec![],
+        }
+    }
+    pub fn add_available_struct(&mut self, name: String) {
+        self.available_structs.push(name);
+    }
+}
+
+#[derive(Clone, Debug)]
+pub struct StructProp {
+    pub name: String,
+    pub value: Value,
+}
+impl StructProp {
+    pub fn get_str(&self) -> String {
+        self.value.get_str()
+    }
+}
 
 pub struct CustomFunc<'a> {
     name: &'a str,
@@ -56,6 +83,7 @@ pub enum VarType {
     String,
     Bool,
     Array(Box<VarType>),
+    Struct(StructShape),
     Unknown,
 }
 impl VarType {
@@ -81,6 +109,7 @@ impl VarType {
             VarType::String => "string",
             VarType::Bool => "bool",
             VarType::Array(_) => "arr",
+            VarType::Struct(_) => "struct",
             VarType::Unknown => "unknown",
         }
     }
@@ -161,9 +190,10 @@ pub fn value_from_token<'a>(t: &Token, value_type: Option<&VarType>) -> Value {
 fn call_func<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
+    structs: &mut StructInfo,
     scope: usize,
     name: &String,
-    args: &Vec<AstNode<'a>>,
+    args: &Vec<AstNode>,
     stdout: &mut Stdout,
 ) -> Option<Value> {
     for func in functions.borrow().iter() {
@@ -177,7 +207,7 @@ fn call_func<'a>(
                 if builtin.name == name {
                     let f = builtin.func;
                     let args = args.iter().map(|a| {
-                        let res = eval_node(vars, Rc::clone(&functions), scope, a, stdout);
+                        let res = eval_node(vars, Rc::clone(&functions), structs, scope, a, stdout);
                         if let Some(val) = res {
                             val
                         } else {
@@ -195,9 +225,9 @@ fn call_func<'a>(
 }
 
 #[derive(Debug, Clone)]
-pub enum EvalValue<'a> {
+pub enum EvalValue {
     Value(Value),
-    Token(Token<'a>),
+    Token(Token),
 }
 
 macro_rules! expr {
@@ -223,11 +253,12 @@ macro_rules! expr_abstracted {
 pub fn eval_exp<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
+    structs: &mut StructInfo,
     scope: usize,
-    exp: &Vec<Box<AstNode<'a>>>,
+    exp: &Vec<Box<AstNode>>,
     stdout: &mut Stdout,
-) -> EvalValue<'a> {
-    let mut flattened = flatten_exp(vars, functions, scope, exp, stdout);
+) -> EvalValue {
+    let mut flattened = flatten_exp(vars, functions, structs, scope, exp, stdout);
 
     let pemdas_operations: [OperatorType; 4] = [
         OperatorType::Mult,
@@ -298,7 +329,7 @@ pub fn eval_exp<'a>(
 }
 
 macro_rules! for_loop {
-    ($stdout:ident, $vars:ident, $functions:ident, $scope:expr, $variant:ident, $type:ty, $start:expr, $to:expr, $inc:expr, $node:ident, $name:expr) => {
+    ($stdout:ident, $vars:ident, $functions:ident, $structs:expr, $scope:expr, $variant:ident, $type:ty, $start:expr, $to:expr, $inc:expr, $node:ident, $name:expr) => {
         let to_num = match $to {
             Value::$variant(num) => num,
             _ => panic!("Expected from to and inc to be of same type"),
@@ -324,7 +355,8 @@ macro_rules! for_loop {
                 eval_node(
                     $vars,
                     Rc::clone(&$functions),
-                    $scope,
+                    $structs,
+                    $scope + 1,
                     $node.as_ref(),
                     $stdout,
                 );
@@ -339,7 +371,8 @@ macro_rules! for_loop {
                 eval_node(
                     $vars,
                     Rc::clone(&$functions),
-                    $scope,
+                    $structs,
+                    $scope + 1,
                     $node.as_ref(),
                     $stdout,
                 );
@@ -359,18 +392,28 @@ macro_rules! for_loop {
 pub fn eval_node<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
+    structs: &mut StructInfo,
     scope: usize,
-    node: &AstNode<'a>,
+    node: &AstNode,
     stdout: &mut Stdout,
-) -> Option<EvalValue<'a>> {
+) -> Option<EvalValue> {
     match &node {
+        AstNode::DefineStruct(name, shape) => unimplemented!(),
         AstNode::SetArrIndex(arr_tok, index_node, value) => {
-            if let Some(index) = eval_node(vars, Rc::clone(&functions), scope, index_node, stdout) {
+            if let Some(index) = eval_node(
+                vars,
+                Rc::clone(&functions),
+                structs,
+                scope,
+                index_node,
+                stdout,
+            ) {
                 if let Token::Identifier(ident) = arr_tok {
                     let var_ptr = get_var_ptr(vars, &ident);
                     set_index_arr(
                         vars,
                         Rc::clone(&functions),
+                        structs,
                         scope,
                         stdout,
                         var_ptr,
@@ -387,7 +430,14 @@ pub fn eval_node<'a>(
             }
         }
         AstNode::IndexArr(arr_tok, index_node) => {
-            if let Some(index) = eval_node(vars, Rc::clone(&functions), scope, index_node, stdout) {
+            if let Some(index) = eval_node(
+                vars,
+                Rc::clone(&functions),
+                structs,
+                scope,
+                index_node,
+                stdout,
+            ) {
                 if let Token::Identifier(ident) = arr_tok {
                     let var_ptr = get_var_ptr(vars, &ident);
                     let res = index_arr(vars, var_ptr, index);
@@ -402,20 +452,33 @@ pub fn eval_node<'a>(
         }
         AstNode::ForFromTo(ident, from, to, inc, node) => {
             if let Token::Identifier(var_name) = ident {
-                let from_val =
-                    match eval_node(vars, Rc::clone(&functions), scope, from.as_ref(), stdout) {
-                        Some(ev) => get_eval_value(vars, ev),
-                        None => panic!("Expected from value in for loop"),
-                    };
-                let to_val =
-                    match eval_node(vars, Rc::clone(&functions), scope, to.as_ref(), stdout) {
-                        Some(ev) => get_eval_value(vars, ev),
-                        None => panic!("Expected to value in for loop"),
-                    };
+                let from_val = match eval_node(
+                    vars,
+                    Rc::clone(&functions),
+                    structs,
+                    scope,
+                    from.as_ref(),
+                    stdout,
+                ) {
+                    Some(ev) => get_eval_value(vars, ev),
+                    None => panic!("Expected from value in for loop"),
+                };
+                let to_val = match eval_node(
+                    vars,
+                    Rc::clone(&functions),
+                    structs,
+                    scope,
+                    to.as_ref(),
+                    stdout,
+                ) {
+                    Some(ev) => get_eval_value(vars, ev),
+                    None => panic!("Expected to value in for loop"),
+                };
                 let inc_val = if let Some(inc_value_node) = inc {
                     match eval_node(
                         vars,
                         Rc::clone(&functions),
+                        structs,
                         scope,
                         inc_value_node.as_ref(),
                         stdout,
@@ -433,6 +496,7 @@ pub fn eval_node<'a>(
                             stdout,
                             vars,
                             functions,
+                            structs,
                             scope,
                             Int,
                             i32,
@@ -448,6 +512,7 @@ pub fn eval_node<'a>(
                             stdout,
                             vars,
                             functions,
+                            structs,
                             scope,
                             Usize,
                             usize,
@@ -463,6 +528,7 @@ pub fn eval_node<'a>(
                             stdout,
                             vars,
                             functions,
+                            structs,
                             scope,
                             Long,
                             i64,
@@ -481,8 +547,10 @@ pub fn eval_node<'a>(
             None
         }
         AstNode::Comparison(comp_token, left, right) => {
-            if let Some(left_res) = eval_node(vars, Rc::clone(&functions), scope, left, stdout) {
-                if let Some(right_res) = eval_node(vars, functions, scope, right, stdout) {
+            if let Some(left_res) =
+                eval_node(vars, Rc::clone(&functions), structs, scope, left, stdout)
+            {
+                if let Some(right_res) = eval_node(vars, functions, structs, scope, right, stdout) {
                     return Some(compare(vars, left_res, right_res, comp_token));
                 } else {
                     panic!("Expected result value from left of condition");
@@ -492,7 +560,14 @@ pub fn eval_node<'a>(
             }
         }
         AstNode::Cast(var_type, node) => {
-            let res_option = eval_node(vars, Rc::clone(&functions), scope, node.as_ref(), stdout);
+            let res_option = eval_node(
+                vars,
+                Rc::clone(&functions),
+                structs,
+                scope,
+                node.as_ref(),
+                stdout,
+            );
 
             if let Some(eval_value) = res_option {
                 let val = get_eval_value(vars, eval_value);
@@ -513,26 +588,33 @@ pub fn eval_node<'a>(
             let var_value = &mut var_ref.value;
 
             let res = match var_value {
-                Value::Array(ref mut vals) => match &prop
-                    .get(0)
-                    .expect("Expected property to access on Array")
-                {
-                    AstNode::CallFunc(name, args) => match name.as_str() {
-                        "push" => {
-                            push_to_array(vars, Rc::clone(&functions), scope, vals, args, stdout);
-                            None
-                        }
-                        _ => panic!("Unknown array method: {}", name),
-                    },
-                    AstNode::Token(t) => match t {
-                        Token::Identifier(ident) => match ident.as_str() {
-                            "length" => Some(EvalValue::Value(Value::Usize(vals.len()))),
-                            _ => unimplemented!(),
+                Value::Array(ref mut vals) => {
+                    match &prop.get(0).expect("Expected property to access on Array") {
+                        AstNode::CallFunc(name, args) => match name.as_str() {
+                            "push" => {
+                                push_to_array(
+                                    vars,
+                                    Rc::clone(&functions),
+                                    structs,
+                                    scope,
+                                    vals,
+                                    args,
+                                    stdout,
+                                );
+                                None
+                            }
+                            _ => panic!("Unknown array method: {}", name),
                         },
-                        _ => panic!("Unexpected method: {:?}", t),
-                    },
-                    _ => panic!("Unexpected operation: {:?}", prop),
-                },
+                        AstNode::Token(t) => match t {
+                            Token::Identifier(ident) => match ident.as_str() {
+                                "length" => Some(EvalValue::Value(Value::Usize(vals.len()))),
+                                _ => unimplemented!(),
+                            },
+                            _ => panic!("Unexpected method: {:?}", t),
+                        },
+                        _ => panic!("Unexpected operation: {:?}", prop),
+                    }
+                }
                 _ => unimplemented!(),
             };
 
@@ -542,7 +624,8 @@ pub fn eval_node<'a>(
             let mut res_arr: Vec<Value> = Vec::new();
 
             for node in arr_nodes.iter() {
-                let res_option = eval_node(vars, Rc::clone(&functions), scope, node, stdout);
+                let res_option =
+                    eval_node(vars, Rc::clone(&functions), structs, scope, node, stdout);
 
                 if let Some(res) = res_option {
                     let val = get_eval_value(vars, res);
@@ -555,6 +638,7 @@ pub fn eval_node<'a>(
             let condition_res = eval_node(
                 vars,
                 Rc::clone(&functions),
+                structs,
                 scope,
                 condition.as_ref(),
                 stdout,
@@ -589,6 +673,7 @@ pub fn eval_node<'a>(
                     eval_node(
                         vars,
                         Rc::clone(&functions),
+                        structs,
                         scope + 1,
                         node.as_ref(),
                         stdout,
@@ -604,6 +689,7 @@ pub fn eval_node<'a>(
                 eval_node(
                     vars,
                     Rc::clone(&functions),
+                    structs,
                     scope,
                     &node.borrow().to_owned(),
                     stdout,
@@ -612,11 +698,13 @@ pub fn eval_node<'a>(
             None
         }
         AstNode::MakeVar(var_type, name, value) => {
-            make_var(vars, functions, scope, var_type, name, value, stdout);
+            make_var(
+                vars, functions, structs, scope, var_type, name, value, stdout,
+            );
             None
         }
         AstNode::SetVar(name, value) => {
-            let value = eval_node(vars, functions, scope, value.as_ref(), stdout);
+            let value = eval_node(vars, functions, structs, scope, value.as_ref(), stdout);
             if let Some(tok) = value {
                 let val = match tok {
                     EvalValue::Token(t) => value_from_token(&t, None),
@@ -635,16 +723,23 @@ pub fn eval_node<'a>(
         }
         AstNode::Token(token) => Some(EvalValue::Token(token.to_owned())),
         AstNode::CallFunc(name, args) => {
-            let func_res = call_func(vars, functions, scope, name, args, stdout);
+            let func_res = call_func(vars, functions, structs, scope, name, args, stdout);
             if let Some(tok) = func_res {
                 Some(EvalValue::Value(tok))
             } else {
                 None
             }
         }
-        AstNode::Exp(nodes) => Some(eval_exp(vars, Rc::clone(&functions), scope, nodes, stdout)),
+        AstNode::Exp(nodes) => Some(eval_exp(
+            vars,
+            Rc::clone(&functions),
+            structs,
+            scope,
+            nodes,
+            stdout,
+        )),
         AstNode::Bang(node) => {
-            let val = eval_node(vars, functions, scope, node.as_ref(), stdout);
+            let val = eval_node(vars, functions, structs, scope, node.as_ref(), stdout);
             let b = if let Some(value) = val {
                 match value {
                     EvalValue::Value(v) => match v {
@@ -670,9 +765,10 @@ pub fn eval_node<'a>(
 pub fn eval<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     functions: Rc<RefCell<Vec<Func<'a>>>>,
-    tree: Ast<'a>,
+    structs: &mut StructInfo,
+    tree: Ast,
     stdout: &mut Stdout,
 ) {
     let root_node = tree.node.borrow();
-    eval_node(vars, functions, 0, &root_node.to_owned(), stdout);
+    eval_node(vars, functions, structs, 0, &root_node.to_owned(), stdout);
 }

@@ -1,5 +1,7 @@
 int[] v = [5, 4, 2, 6, 3, 7, 1, 7, 4];
 
+print(v);
+
 for (i; usize(0); v.length - usize(1)) {
   for (j; usize(0); v.length - i - usize(1)) {
     if (v[j] > v[j + usize(1)]) {

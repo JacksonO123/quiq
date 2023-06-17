@@ -1,0 +1,10 @@
+struct Temp {
+  name: string;
+  number: int;
+  skills: long[];
+  other: Other;
+}
+
+Temp str;
+
+print(str);
