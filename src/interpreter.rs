@@ -3,25 +3,26 @@ use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 use crate::{
     ast::{Ast, AstNode, StructShape, Value},
     helpers::{
-        cast, compare, flatten_exp, get_eval_value, index_arr, make_var, push_to_array,
-        set_index_arr, set_var_value, ExpValue,
+        cast, compare, ensure_type, flatten_exp, get_eval_value, index_arr, make_var,
+        push_to_array, set_index_arr, set_var_value, ExpValue,
     },
     tokenizer::{OperatorType, Token},
 };
 
+#[derive(Debug)]
 pub struct StructInfo {
-    pub available_structs: Vec<String>,
-    pub structs: Vec<VarValue>,
+    pub available_structs: HashMap<String, StructShape>,
+    pub structs: HashMap<String, VarValue>,
 }
 impl StructInfo {
     pub fn new() -> Self {
         Self {
-            available_structs: vec![],
-            structs: vec![],
+            available_structs: HashMap::new(),
+            structs: HashMap::new(),
         }
     }
-    pub fn add_available_struct(&mut self, name: String) {
-        self.available_structs.push(name);
+    pub fn add_available_struct(&mut self, name: String, shape: StructShape) {
+        self.available_structs.insert(name, shape);
     }
 }
 
@@ -83,8 +84,9 @@ pub enum VarType {
     String,
     Bool,
     Array(Box<VarType>),
-    Struct(StructShape),
-    Unknown,
+    /// struct type name, shape
+    Struct(String, StructShape),
+    Null,
 }
 impl VarType {
     pub fn from(string: &str) -> Self {
@@ -109,8 +111,8 @@ impl VarType {
             VarType::String => "string",
             VarType::Bool => "bool",
             VarType::Array(_) => "arr",
-            VarType::Struct(_) => "struct",
-            VarType::Unknown => "unknown",
+            VarType::Struct(_, _) => "struct",
+            VarType::Null => "null",
         }
     }
 }
@@ -398,7 +400,35 @@ pub fn eval_node<'a>(
     stdout: &mut Stdout,
 ) -> Option<EvalValue> {
     match &node {
-        AstNode::DefineStruct(name, shape) => unimplemented!(),
+        AstNode::CreateStruct(name, shape, props) => {
+            let mut struct_props: Vec<StructProp> = Vec::new();
+            for prop in props.iter() {
+                let (name, node) = prop;
+                let val = eval_node(vars, Rc::clone(&functions), structs, scope, node, stdout);
+
+                if let Some(value) = val {
+                    let value = get_eval_value(vars, value);
+
+                    let val_type_option = shape.props.get(name);
+                    if let Some(val_type) = val_type_option {
+                        if !ensure_type(val_type, &value) {
+                            panic!("bad");
+                        }
+                    }
+
+                    struct_props.push(StructProp {
+                        name: name.clone(),
+                        value,
+                    });
+                } else {
+                    panic!("Expected value for struct property");
+                }
+            }
+
+            let res = Value::Struct(name.clone(), shape.clone(), struct_props);
+
+            Some(EvalValue::Value(res))
+        }
         AstNode::SetArrIndex(arr_tok, index_node, value) => {
             if let Some(index) = eval_node(
                 vars,
@@ -588,7 +618,7 @@ pub fn eval_node<'a>(
             let var_value = &mut var_ref.value;
 
             let res = match var_value {
-                Value::Array(ref mut vals) => {
+                Value::Array(ref mut vals, arr_type) => {
                     match &prop.get(0).expect("Expected property to access on Array") {
                         AstNode::CallFunc(name, args) => match name.as_str() {
                             "push" => {
@@ -598,6 +628,7 @@ pub fn eval_node<'a>(
                                     structs,
                                     scope,
                                     vals,
+                                    arr_type,
                                     args,
                                     stdout,
                                 );
@@ -620,7 +651,7 @@ pub fn eval_node<'a>(
 
             res
         }
-        AstNode::Array(arr_nodes) => {
+        AstNode::Array(arr_nodes, arr_type) => {
             let mut res_arr: Vec<Value> = Vec::new();
 
             for node in arr_nodes.iter() {
@@ -629,10 +660,15 @@ pub fn eval_node<'a>(
 
                 if let Some(res) = res_option {
                     let val = get_eval_value(vars, res);
+
+                    if !ensure_type(arr_type, &val) {
+                        panic!("Wrong type in array, expected {:?}", arr_type);
+                    }
+
                     res_arr.push(val);
                 }
             }
-            Some(EvalValue::Value(Value::Array(res_arr)))
+            Some(EvalValue::Value(Value::Array(res_arr, arr_type.clone())))
         }
         AstNode::If(condition, node) => {
             let condition_res = eval_node(

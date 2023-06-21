@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, io::Stdout, process::exit, rc::Rc};
 
 use crate::{
-    ast::{get_ast_node, get_value_arr_str, AstNode, StructShape, StructShapeProp, Value},
+    ast::{get_ast_node, get_value_arr_str, AstNode, StructShape, Value},
     interpreter::{
         eval_node, get_var_ptr, value_from_token, EvalValue, Func, StructInfo, StructProp, VarType,
         VarValue,
@@ -16,27 +16,36 @@ pub fn make_var<'a>(
     scope: usize,
     var_type: &VarType,
     name: &Token,
-    value: &Box<AstNode>,
+    value: &Option<Box<AstNode>>,
     stdout: &mut Stdout,
 ) {
-    let value = eval_node(vars, functions, structs, scope, value.as_ref(), stdout);
+    let value = if let Some(val) = value {
+        eval_node(vars, functions, structs, scope, val.as_ref(), stdout)
+    } else {
+        Some(EvalValue::Value(Value::Null))
+    };
+
     if let Some(tok) = value {
         let val = match tok {
             EvalValue::Token(t) => value_from_token(&t, Some(var_type)),
-            EvalValue::Value(v) => {
-                if ensure_type(&var_type, &v) {
-                    v
-                } else {
-                    panic!(
-                        "Unexpected variable type definition, expected {:?} found {:?}",
-                        match v {
-                            Value::Array(arr) => VarType::Array(Box::new(get_array_type(&arr))),
-                            _ => panic!(),
-                        },
-                        var_type
-                    )
+            EvalValue::Value(v) => match v {
+                Value::Null => v,
+                _ => {
+                    if ensure_type(&var_type, &v) {
+                        v
+                    } else {
+                        panic!(
+                            "Unexpected variable type definition, expected {:?} found {:?}",
+                            match v {
+                                Value::Array(_, arr_type) =>
+                                    VarType::Array(Box::new(arr_type.clone())),
+                                _ => panic!(),
+                            },
+                            var_type
+                        )
+                    }
                 }
-            }
+            },
         };
 
         let var_name = if let Token::Identifier(ident) = name {
@@ -55,11 +64,22 @@ pub fn make_var<'a>(
 pub fn create_make_var_node<'a>(
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
+    is_struct: bool,
 ) -> AstNode {
-    let mut var_type = if let Token::Type(t) = tokens[0].take().unwrap() {
+    let first_token = tokens[0].take().unwrap();
+    let mut var_type = if let Token::Type(t) = first_token {
         t
     } else {
-        panic!("Expected identifier for variable name");
+        if is_struct {
+            if let Token::Identifier(ident) = first_token {
+                let shape = structs.available_structs.get(&ident).unwrap();
+                VarType::Struct(ident.clone(), shape.clone())
+            } else {
+                panic!("Expected identifier for variable name");
+            }
+        } else {
+            panic!("Expected identifier for variable name");
+        }
     };
 
     let mut i = 0;
@@ -72,32 +92,34 @@ pub fn create_make_var_node<'a>(
         i += 2;
     }
 
-    let eq_pos = tokens
-        .iter()
-        .position(|t| {
-            if t.is_some() {
-                match t.as_ref().unwrap() {
-                    Token::EqSet => true,
-                    _ => false,
-                }
-            } else {
-                false
+    let eq_pos = tokens.iter().position(|t| {
+        if t.is_some() {
+            match t.as_ref().unwrap() {
+                Token::EqSet => true,
+                _ => false,
             }
-        })
-        .unwrap();
+        } else {
+            false
+        }
+    });
 
-    let mut value_to_set = tokens_to_delimiter(tokens, eq_pos + 1, ";");
+    if let Some(pos) = eq_pos {
+        let mut value_to_set = tokens_to_delimiter(tokens, pos + 1, ";");
 
-    let node = get_ast_node(structs, &mut value_to_set);
-    if node.is_none() {
-        panic!("Invalid value, expected value to set variable");
+        let node = get_ast_node(structs, &mut value_to_set);
+        if node.is_none() {
+            panic!("Invalid value, expected value to set variable");
+        }
+
+        return AstNode::MakeVar(
+            var_type,
+            tokens[pos - 1].take().unwrap(),
+            Some(Box::new(node.unwrap())),
+        );
     }
 
-    AstNode::MakeVar(
-        var_type,
-        tokens[eq_pos - 1].take().unwrap(),
-        Box::new(node.unwrap()),
-    )
+    let len = tokens.len();
+    return AstNode::MakeVar(var_type, tokens[len - 2].take().unwrap(), None);
 }
 
 pub fn create_set_var_node<'a>(
@@ -116,7 +138,7 @@ pub fn create_keyword_node<'a>(
     tokens: &mut Vec<Option<Token>>,
     structs: &mut StructInfo,
     keyword: Keyword,
-) -> AstNode {
+) -> Option<AstNode> {
     match keyword {
         Keyword::If => {
             // 2 because tokens: [if, (]
@@ -130,7 +152,7 @@ pub fn create_keyword_node<'a>(
 
             if let Some(c_node) = condition_node {
                 if let Some(tr_node) = to_run_node {
-                    AstNode::If(Box::new(c_node), Box::new(tr_node))
+                    Some(AstNode::If(Box::new(c_node), Box::new(tr_node)))
                 } else {
                     panic!("Expected block for `if`");
                 }
@@ -172,13 +194,13 @@ pub fn create_keyword_node<'a>(
 
             let mut node_tokens = tokens_to_delimiter(tokens, range_tokens.len() + 4, "}");
             if let Some(node) = get_ast_node(structs, &mut node_tokens) {
-                AstNode::ForFromTo(
+                Some(AstNode::ForFromTo(
                     ident,
                     Box::new(start_node),
                     Box::new(end_node),
                     inc_node,
                     Box::new(node),
-                )
+                ))
             } else {
                 panic!("Expected block to loop");
             }
@@ -186,11 +208,18 @@ pub fn create_keyword_node<'a>(
         Keyword::While => unimplemented!(),
         Keyword::Struct => {
             // [struct, name, {]
+            let name_option = tokens[1].as_ref().unwrap().clone();
             let mut shape_tokens = tokens_to_delimiter(tokens, 2, "}");
-            let shape = create_struct_shape(&mut shape_tokens);
+
+            let shape = if let Token::Identifier(ident) = name_option {
+                create_struct_shape(&mut shape_tokens, &ident, structs)
+            } else {
+                panic!("Expected identifier for struct decleration name");
+            };
+
             if let Token::Identifier(ident) = tokens[1].take().unwrap() {
-                structs.add_available_struct(ident.clone());
-                AstNode::DefineStruct(ident, shape)
+                structs.add_available_struct(ident.clone(), shape.clone());
+                None
             } else {
                 panic!("Expected identifier for struct name");
             }
@@ -198,10 +227,14 @@ pub fn create_keyword_node<'a>(
     }
 }
 
-fn create_struct_shape<'a>(shape: &mut Vec<Option<Token>>) -> StructShape {
+fn create_struct_shape<'a>(
+    shape: &mut Vec<Option<Token>>,
+    name: &String,
+    structs: &mut StructInfo,
+) -> StructShape {
     let mut struct_shape = StructShape::new();
     let mut offset = 1;
-    loop {
+    while offset < shape.len() {
         let mut prop = tokens_to_delimiter(shape, offset, ";");
 
         if prop.len() == 0 {
@@ -219,8 +252,11 @@ fn create_struct_shape<'a>(shape: &mut Vec<Option<Token>>) -> StructShape {
             Token::RBrace => break,
             _ => {
                 let mut prop_type = match prop[2].as_ref().unwrap() {
-                    Token::Type(t) => StructShapeProp::Type(t.clone()),
-                    Token::Identifier(val) => StructShapeProp::Ident(val.to_owned()),
+                    Token::Type(t) => t.clone(),
+                    Token::Identifier(val) => match structs.available_structs.get(val) {
+                        Some(shape) => VarType::Struct(name.clone(), shape.clone()),
+                        None => panic!("Unexpected struct type name {}", val),
+                    },
                     _ => panic!("Expected type or identifier for struct property type"),
                 };
 
@@ -235,7 +271,7 @@ fn create_struct_shape<'a>(shape: &mut Vec<Option<Token>>) -> StructShape {
                         ),
                     }
                 {
-                    prop_type = StructShapeProp::Array(Box::new(prop_type));
+                    prop_type = VarType::Array(Box::new(prop_type));
                     array_offset += 2;
                 }
 
@@ -339,14 +375,14 @@ pub fn set_var_value<'a>(
     if let Some(res) = res_option {
         let mut value_ref = res.borrow_mut();
         let var_value = &value_ref.value;
-        let var_value_type = get_var_type_from_value(var_value);
+        let var_value_type = type_from_value(var_value);
         if ensure_type(&var_value_type, &value) {
             value_ref.value = value;
         } else {
             panic!(
                 "expected type: {:?} found {:?}",
                 var_value_type,
-                get_var_type_from_value(&value)
+                type_from_value(&value)
             );
         }
     } else {
@@ -491,7 +527,7 @@ pub fn is_exp(tokens: &mut Vec<Option<Token>>) -> bool {
             Token::LBracket => open_paren += 1,
             Token::RBracket => open_paren -= 1,
             Token::Operator(_) => {
-                if open_paren == 0 {
+                if open_paren == 0 && i > 0 && i < tokens.len() - 1 {
                     has_operator = true;
                 }
             }
@@ -568,58 +604,77 @@ pub fn create_bang_bool<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<To
     }
 }
 
-fn create_arr_with_tokens<'a>(
-    structs: &mut StructInfo,
-    tokens: &mut Vec<Option<Token>>,
-) -> AstNode {
-    let mut node_tokens = tokens_to_delimiter(tokens, 0, ",");
-    let mut i = node_tokens.len() + 1;
+pub fn get_type_expression(tokens: &mut Vec<Option<Token>>, structs: &mut StructInfo) -> VarType {
+    let first_token = tokens[0].take().unwrap();
+    let first_type = if let Token::Type(t) = first_token {
+        t
+    } else {
+        if let Token::Identifier(ident) = first_token {
+            match structs.available_structs.get(&ident) {
+                Some(v) => VarType::Struct(ident.clone(), v.clone()),
+                None => panic!("Expected type or struct name for type expression"),
+            }
+        } else {
+            panic!("Expected type or struct name for type expression");
+        }
+    };
+    if tokens.len() == 1 {
+        first_type
+    } else {
+        let mut index = 1;
 
-    let mut arr_values: Vec<AstNode> = Vec::new();
-
-    while node_tokens.len() > 0 {
-        let node_option = get_ast_node(structs, &mut node_tokens);
-
-        if let Some(node) = node_option {
-            arr_values.push(node);
+        let mut arr_type = first_type;
+        while index < tokens.len()
+            && match tokens[index].as_ref().unwrap() {
+                Token::LBracket => true,
+                _ => false,
+            }
+        {
+            arr_type = VarType::Array(Box::new(arr_type));
+            index += 1;
         }
 
-        node_tokens = tokens_to_delimiter(tokens, i, ",");
-        i += node_tokens.len() + 1;
+        arr_type
     }
-
-    let res = AstNode::Array(arr_values);
-
-    res
 }
 
-pub fn create_arr<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> AstNode {
-    let mut new_tokens: Vec<Option<Token>> = Vec::new();
-    for i in 1..tokens.len() - 1 {
-        new_tokens.push(Some(tokens[i].take().unwrap()));
+pub fn create_arr<'a>(
+    structs: &mut StructInfo,
+    tokens: &mut Vec<Option<Token>>,
+    arr_type: VarType,
+) -> AstNode {
+    // 3 because [[, ]]
+    if tokens.len() == 2 {
+        return AstNode::Array(vec![], arr_type);
     }
 
-    if new_tokens.len() == 0 {
-        return AstNode::Array(vec![]);
+    tokens.remove(tokens.len() - 1);
+
+    let mut node_arr: Vec<AstNode> = Vec::new();
+    let mut start = 1;
+    while start < tokens.len() {
+        while start < tokens.len() && tokens[start].as_ref().is_none() {
+            start += 1;
+        }
+
+        let mut item_tokens = tokens_to_delimiter(tokens, start, ",");
+
+        if let Some(node) = get_ast_node(structs, &mut item_tokens) {
+            node_arr.push(node);
+        };
+
+        start += item_tokens.len() + 1;
     }
 
-    match new_tokens[0].as_ref().unwrap() {
-        Token::LBracket => create_arr_with_tokens(structs, &mut new_tokens),
-        Token::Number(_) => create_arr_with_tokens(structs, &mut new_tokens),
-        Token::String(_) => create_arr_with_tokens(structs, &mut new_tokens),
-        Token::Bool(_) => create_arr_with_tokens(structs, &mut new_tokens),
-        Token::Identifier(_) => create_arr_with_tokens(structs, &mut new_tokens),
-        _ => panic!("Unexpected token: {:?}", new_tokens[0]),
-    }
+    AstNode::Array(node_arr, arr_type)
 }
 
 pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
-    match var_type {
-        VarType::Unknown => return true,
-        _ => {}
-    }
-
     match val {
+        Value::Null => match var_type {
+            VarType::Null => true,
+            _ => false,
+        },
         Value::Usize(_) => match var_type {
             VarType::Usize => true,
             _ => false,
@@ -648,17 +703,26 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
             VarType::Bool => true,
             _ => false,
         },
-        Value::Array(arr) => match var_type {
-            VarType::Array(arr_type) => {
+        Value::Array(arr, _) => match var_type {
+            VarType::Array(type_for_arr) => {
                 if arr.len() == 0 {
                     return true;
                 }
 
-                ensure_type(arr_type.as_ref(), &arr[0])
+                for item in arr.iter() {
+                    if !ensure_type(type_for_arr.as_ref(), item) {
+                        return false;
+                    }
+                }
+
+                true
             }
             _ => false,
         },
-        Value::Struct(_, _) => unimplemented!(),
+        Value::Struct(name1, _, _) => match var_type {
+            VarType::Struct(name2, _) => name1 == name2,
+            _ => false,
+        },
     }
 }
 
@@ -685,21 +749,20 @@ pub fn push_to_array<'a>(
     structs: &mut StructInfo,
     scope: usize,
     arr: &mut Vec<Value>,
+    arr_type: &mut VarType,
     args: &Vec<AstNode>,
     stdout: &mut Stdout,
 ) {
-    let arr_item_type = get_array_type(&arr);
-
     for arg in args.iter() {
         let arg_res_option = eval_node(vars, Rc::clone(&functions), structs, scope, arg, stdout);
 
         if let Some(arg_res) = arg_res_option {
             let val = get_eval_value(vars, arg_res);
-            if !ensure_type(&arr_item_type, &val) {
+            if !ensure_type(&arr_type, &val) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
-                    arr_item_type,
-                    get_var_type_from_value(&val),
+                    arr_type,
+                    type_from_value(&val),
                 );
             }
             arr.push(val);
@@ -707,8 +770,9 @@ pub fn push_to_array<'a>(
     }
 }
 
-fn get_var_type_from_value(val: &Value) -> VarType {
+fn type_from_value(val: &Value) -> VarType {
     match val {
+        Value::Null => VarType::Null,
         Value::Usize(_) => VarType::Usize,
         Value::String(_) => VarType::String,
         Value::Int(_) => VarType::Int,
@@ -716,16 +780,8 @@ fn get_var_type_from_value(val: &Value) -> VarType {
         Value::Double(_) => VarType::Double,
         Value::Long(_) => VarType::Long,
         Value::Bool(_) => VarType::Bool,
-        Value::Struct(shape, _) => VarType::Struct(shape.clone()),
-        Value::Array(vals) => VarType::Array(Box::new(get_array_type(&vals))),
-    }
-}
-
-pub fn get_array_type(values: &Vec<Value>) -> VarType {
-    if values.len() > 0 {
-        get_var_type_from_value(&values[0])
-    } else {
-        VarType::Unknown
+        Value::Struct(name, shape, _) => VarType::Struct(name.clone(), shape.clone()),
+        Value::Array(_, arr_type) => VarType::Array(Box::new(arr_type.clone())),
     }
 }
 
@@ -747,6 +803,7 @@ pub fn create_cast_node<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<To
 
 pub fn cast(to_type: &VarType, val: Value) -> Value {
     match val {
+        Value::Null => panic!("Cannot cast null"),
         Value::Usize(v) => match to_type {
             VarType::Usize => val,
             VarType::Int => Value::Int(v as i32),
@@ -764,8 +821,8 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert usize to array"),
-            VarType::Unknown => panic!("Cannot convert usize to unknown"),
-            VarType::Struct(_) => panic!("Cannot convert usize to struct"),
+            VarType::Struct(_, _) => panic!("Cannot convert usize to struct"),
+            VarType::Null => panic!("Cannot convert usize to null"),
         },
         Value::String(v) => match to_type {
             VarType::Usize => {
@@ -782,8 +839,8 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::String => Value::String(v),
             VarType::Bool => Value::Bool(v.parse::<bool>().expect("Error parsing string to bool")),
             VarType::Array(_) => panic!("Cannot convert string to array"),
-            VarType::Unknown => panic!("Cannot convert string to unknown"),
-            VarType::Struct(_) => panic!("Cannot convert string to struct"),
+            VarType::Struct(_, _) => panic!("Cannot convert string to struct"),
+            VarType::Null => panic!("Cannot convert string to null"),
         },
         Value::Int(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -802,8 +859,8 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert int to array"),
-            VarType::Unknown => panic!("Cannot convert int to unknown"),
-            VarType::Struct(_) => panic!("Cannot convert int to struct"),
+            VarType::Struct(_, _) => panic!("Cannot convert int to struct"),
+            VarType::Null => panic!("Cannot convert int to null"),
         },
         Value::Float(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -822,8 +879,8 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert float to array"),
-            VarType::Unknown => panic!("Cannot convert float to unknown"),
-            VarType::Struct(_) => panic!("Cannot convert float to struct"),
+            VarType::Struct(_, _) => panic!("Cannot convert float to struct"),
+            VarType::Null => panic!("Cannot convert float to null"),
         },
         Value::Double(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -842,8 +899,8 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert double to array"),
-            VarType::Unknown => panic!("Cannot convert double to unknown"),
-            VarType::Struct(_) => panic!("Cannot convert double to struct"),
+            VarType::Struct(_, _) => panic!("Cannot convert double to struct"),
+            VarType::Null => panic!("Cannot convert double to null"),
         },
         Value::Long(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -862,8 +919,8 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => panic!("Cannot convert long to array"),
-            VarType::Unknown => panic!("Cannot convert long to unknown"),
-            VarType::Struct(_) => panic!("Cannot convert long to struct"),
+            VarType::Struct(_, _) => panic!("Cannot convert long to struct"),
+            VarType::Null => panic!("Cannot convert long to null"),
         },
         Value::Bool(v) => {
             let num_val = if v { 1 } else { 0 };
@@ -876,11 +933,11 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 VarType::String => Value::String(v.to_string()),
                 VarType::Bool => val,
                 VarType::Array(_) => panic!("Cannot convert bool to array"),
-                VarType::Unknown => panic!("Cannot convert bool to unknown"),
-                VarType::Struct(_) => panic!("Cannot convert bool to struct"),
+                VarType::Struct(_, _) => panic!("Cannot convert bool to struct"),
+                VarType::Null => panic!("Cannot convert bool to null"),
             }
         }
-        Value::Array(arr) => match to_type {
+        Value::Array(arr, _) => match to_type {
             VarType::Usize => panic!("Cannot convert array to usize"),
             VarType::Int => panic!("Cannot convert array to int"),
             VarType::Float => panic!("Cannot convert array to float"),
@@ -889,10 +946,10 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::String => Value::String(get_value_arr_str(&arr)),
             VarType::Bool => panic!("Cannot convert array to bool"),
             VarType::Array(_) => unimplemented!(),
-            VarType::Unknown => panic!("Cannot convert array to unknown"),
-            VarType::Struct(_) => panic!("Cannot convert array to struct"),
+            VarType::Struct(_, _) => panic!("Cannot convert array to struct"),
+            VarType::Null => panic!("Cannot convert array to null"),
         },
-        Value::Struct(_, _) => panic!("Cannot cast structs"),
+        Value::Struct(_, _, _) => panic!("Cannot cast structs"),
     }
 }
 
@@ -1013,8 +1070,34 @@ pub fn create_comp_node<'a>(
         if match tokens[i].as_ref().unwrap() {
             Token::EqCompare => true,
             Token::EqNCompare => true,
-            Token::LAngle => true,
-            Token::RAngle => true,
+            Token::LAngle => {
+                if i == 0 || i == tokens.len() - 1 {
+                    return None;
+                } else {
+                    if match tokens[i - 1].as_ref().unwrap() {
+                        Token::EqSet => true,
+                        _ => false,
+                    } {
+                        return None;
+                    } else {
+                        true
+                    }
+                }
+            }
+            Token::RAngle => {
+                if i == 0 || i == tokens.len() - 1 {
+                    return None;
+                } else {
+                    if match tokens[i - 1].as_ref().unwrap() {
+                        Token::EqSet => true,
+                        _ => false,
+                    } {
+                        return None;
+                    } else {
+                        true
+                    }
+                }
+            }
             Token::LAngleEq => true,
             Token::RAngleEq => true,
             _ => false,
@@ -1049,95 +1132,56 @@ pub fn create_comp_node<'a>(
     None
 }
 
-macro_rules! compare_var_type {
-    ($type1:expr, $type2:expr) => {
-        match $type1 {
-            VarType::Usize => match $type2 {
-                VarType::Usize => true,
-                _ => false,
-            },
-            VarType::Int => match $type2 {
-                VarType::Int => true,
-                _ => false,
-            },
-            VarType::Float => match $type2 {
-                VarType::Float => true,
-                _ => false,
-            },
-            VarType::Double => match $type2 {
-                VarType::Double => true,
-                _ => false,
-            },
-            VarType::Long => match $type2 {
-                VarType::Long => true,
-                _ => false,
-            },
-            VarType::String => match $type2 {
-                VarType::String => true,
-                _ => false,
-            },
-            VarType::Bool => match $type2 {
-                VarType::Bool => true,
-                _ => false,
-            },
-            VarType::Array(vals1) => match $type2 {
-                VarType::Array(vals2) => compare_var_type(vals1.as_ref(), vals2.as_ref()),
-                _ => false,
-            },
-            VarType::Struct(shape1) => match $type2 {
-                VarType::Struct(shape2) => validate_shape(shape1, shape2),
-                _ => false,
-            },
-            VarType::Unknown => match $type2 {
-                VarType::Unknown => true,
-                _ => false,
-            },
-        }
-    };
-}
+// macro_rules! compare_var_type {
+//     ($type1:expr, $type2:expr) => {
+//         match $type1 {
+//             VarType::Usize => match $type2 {
+//                 VarType::Usize => true,
+//                 _ => false,
+//             },
+//             VarType::Int => match $type2 {
+//                 VarType::Int => true,
+//                 _ => false,
+//             },
+//             VarType::Float => match $type2 {
+//                 VarType::Float => true,
+//                 _ => false,
+//             },
+//             VarType::Double => match $type2 {
+//                 VarType::Double => true,
+//                 _ => false,
+//             },
+//             VarType::Long => match $type2 {
+//                 VarType::Long => true,
+//                 _ => false,
+//             },
+//             VarType::String => match $type2 {
+//                 VarType::String => true,
+//                 _ => false,
+//             },
+//             VarType::Bool => match $type2 {
+//                 VarType::Bool => true,
+//                 _ => false,
+//             },
+//             VarType::Array(vals1) => match $type2 {
+//                 VarType::Array(vals2) => compare_var_type(vals1.as_ref(), vals2.as_ref()),
+//                 _ => false,
+//             },
+//             VarType::Struct(name1, _) => match $type2 {
+//                 VarType::Struct(name2, _) => name1 == name2,
+//                 _ => false,
+//             },
+//             VarType::Null => match $type2 {
+//                 VarType::Null => true,
+//                 _ => false,
+//             },
+//         }
+//     };
+// }
 
-pub fn compare_var_type(type1: &VarType, type2: &VarType) -> bool {
-    compare_var_type!(type1, type2)
-}
-
-pub fn validate_shape_prop(prop1: &StructShapeProp, prop2: &StructShapeProp) -> bool {
-    match prop1 {
-        StructShapeProp::Ident(val1) => match prop2 {
-            StructShapeProp::Ident(val2) => val1 == val2,
-            _ => false,
-        },
-        StructShapeProp::Type(t1) => match prop2 {
-            StructShapeProp::Type(t2) => compare_var_type!(t1, t2),
-            _ => false,
-        },
-        StructShapeProp::Array(arr1) => match prop2 {
-            StructShapeProp::Array(arr2) => validate_shape_prop(arr1.as_ref(), arr2.as_ref()),
-            _ => false,
-        },
-    }
-}
-
-pub fn validate_shape(shape1: &StructShape, shape2: &StructShape) -> bool {
-    for prop1 in shape1.props.iter() {
-        let (name1, shape_prop1) = prop1;
-
-        let mut found = false;
-        for prop2 in shape2.props.iter() {
-            let (name2, shape_prop2) = prop2;
-
-            if name1 == name2 && validate_shape_prop(&shape_prop1, &shape_prop2) {
-                found = true;
-                break;
-            }
-        }
-
-        if !found {
-            return false;
-        }
-    }
-
-    true
-}
+// pub fn compare_var_type(type1: &VarType, type2: &VarType) -> bool {
+//     compare_var_type!(type1, type2)
+// }
 
 macro_rules! comp {
     ($left:expr, $right:expr, ==, $($variants:ident),*) => {
@@ -1146,23 +1190,27 @@ macro_rules! comp {
                 $(
                     Value::$variants(l) => match $right {
                         Value::$variants(r) => Ok(l == r),
-                        Value::Array(_) => Err(String::from("Cannot compare arrays")),
+                        Value::Array(_, _) => Err(String::from("Cannot compare arrays")),
                         _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
                     }
                 )*
-                Value::Array(left_arr) => match $right {
-                    Value::Array(right_arr) => Ok(compare_array(left_arr, right_arr, $right)),
+                Value::Array(left_arr, left_type) => match $right {
+                    Value::Array(right_arr, _) => Ok(compare_array(left_arr, right_arr, left_type, $right)),
                     _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
                 }
-                Value::Struct(shape_left, props_left) => match $right {
-                    Value::Struct(shape_right, props_right) => {
-                        Ok(if (!validate_shape(shape_left, shape_right)) {
+                Value::Struct(left_name, _, props_left) => match $right {
+                    Value::Struct(right_name, _, props_right) => {
+                        Ok(if left_name == right_name {
                             false
                         } else {
                             compare_struct_values(props_left, props_right)
                         })
                     },
                     _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
+                },
+                Value::Null => match $right {
+                    Value::Null => Ok(true),
+                    _ => Ok(false),
                 }
             }
         }
@@ -1173,20 +1221,25 @@ macro_rules! comp {
                 $(
                     Value::$variants(l) => match $right {
                         Value::$variants(r) => Ok(l $c r),
-                        Value::Array(_) => Err(String::from("Cannot compare arrays")),
+                        Value::Array(_, _) => Err(String::from("Cannot compare arrays")),
                         _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
                     }
                 )*
-                Value::Array(_) => Err(String::from("Arrays can only be compared with `==` operator")),
-                Value::Struct(_, _) => Err(String::from("Structs can only be compared with `==` operator")),
+                Value::Array(_, _) => Err(String::from("Arrays can only be compared with `==` operator")),
+                Value::Struct(_, _, _) => Err(String::from("Structs can only be compared with `==` operator")),
+                Value::Null => Err(String::from("Null can only be compared with `==` operator"))
             }
         }
     };
 }
 
-fn compare_array(left: &Vec<Value>, right: &Vec<Value>, right_val: &Value) -> bool {
-    let arr_type = get_array_type(left);
-    if !ensure_type(&arr_type, right_val) {
+fn compare_array(
+    left: &Vec<Value>,
+    right: &Vec<Value>,
+    left_type: &VarType,
+    right_val: &Value,
+) -> bool {
+    if !ensure_type(left_type, right_val) {
         if left.len() != right.len() {
             return false;
         }
@@ -1338,7 +1391,7 @@ pub fn index_arr(
     index: EvalValue,
 ) -> Value {
     match &arr.borrow().value {
-        Value::Array(arr) => {
+        Value::Array(arr, _) => {
             let index = get_eval_value(vars, index);
 
             match index {
@@ -1366,7 +1419,7 @@ pub fn set_index_arr<'a>(
         let index_val = get_eval_value(vars, index);
         match index_val {
             Value::Usize(val) => match arr.borrow_mut().value {
-                Value::Array(ref mut arr_val) => {
+                Value::Array(ref mut arr_val, _) => {
                     arr_val[val] = get_eval_value(vars, value);
                 }
                 _ => panic!("Only arrays can be indexed"),
@@ -1376,4 +1429,65 @@ pub fn set_index_arr<'a>(
     } else {
         panic!("Expected value to set at array index");
     }
+}
+
+pub fn create_struct_node(
+    tokens: &mut Vec<Option<Token>>,
+    structs: &mut StructInfo,
+    shape: StructShape,
+    name: &String,
+) -> AstNode {
+    let mut start = 1;
+    let mut props: Vec<(String, AstNode)> = Vec::new();
+
+    let mut i = 0;
+    while i < tokens.len() {
+        if let Some(tok) = tokens[i].as_ref() {
+            if match tok {
+                Token::NewLine => true,
+                _ => false,
+            } {
+                tokens.remove(i);
+            } else {
+                i += 1;
+            }
+        }
+    }
+
+    while start < tokens.len() {
+        if tokens[start].as_ref().is_none() {
+            start += 3;
+            continue;
+        }
+
+        let mut property = tokens_to_delimiter(tokens, start, ",");
+
+        if let Token::RBrace = property[property.len() - 1].as_ref().unwrap() {
+            property.remove(property.len() - 1);
+        }
+
+        if property.len() == 0 {
+            break;
+        }
+
+        let name = if let Token::Identifier(ident) = property[0].take().unwrap() {
+            ident
+        } else {
+            panic!("Expected identifier for struct property name");
+        };
+
+        property.remove(0);
+        property.remove(0);
+
+        let prop_node = get_ast_node(structs, &mut property);
+        if let Some(node) = prop_node {
+            props.push((name, node));
+        } else {
+            panic!("Expected value for struct property");
+        }
+
+        start += property.len() + 3;
+    }
+
+    AstNode::CreateStruct(name.clone(), shape, props)
 }

@@ -2,9 +2,12 @@ struct Temp {
   name: string;
   number: int;
   skills: long[];
-  other: Other;
 }
 
-Temp str;
+Temp str = <Temp>{
+  name: "hi",
+  number: 123,
+  skills: <long>[long(123)]
+};
 
 print(str);

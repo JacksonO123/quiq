@@ -3,23 +3,17 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 use crate::{
     helpers::{
         create_arr, create_bang_bool, create_cast_node, create_comp_node, create_func_call_node,
-        create_keyword_node, create_make_var_node, create_set_var_node, get_exp_node,
-        get_struct_access_tokens, is_exp, is_sequence, tokens_to_delimiter,
+        create_keyword_node, create_make_var_node, create_set_var_node, create_struct_node,
+        get_exp_node, get_struct_access_tokens, get_type_expression, is_exp, is_sequence,
+        tokens_to_delimiter,
     },
     interpreter::{StructInfo, StructProp, VarType},
     tokenizer::Token,
 };
 
 #[derive(Debug, Clone)]
-pub enum StructShapeProp {
-    Ident(String),
-    Type(VarType),
-    Array(Box<StructShapeProp>),
-}
-
-#[derive(Debug, Clone)]
 pub struct StructShape {
-    pub props: HashMap<String, StructShapeProp>,
+    pub props: HashMap<String, VarType>,
 }
 impl StructShape {
     pub fn new() -> Self {
@@ -27,7 +21,7 @@ impl StructShape {
             props: HashMap::new(),
         }
     }
-    pub fn add(&mut self, name: String, prop_type: StructShapeProp) {
+    pub fn add(&mut self, name: String, prop_type: VarType) {
         self.props.insert(name.to_owned(), prop_type);
     }
 }
@@ -77,9 +71,10 @@ pub enum Value {
     Double(f64),
     Long(i64),
     Bool(bool),
-    Array(Vec<Value>),
-    /// shape, props
-    Struct(StructShape, Vec<StructProp>),
+    Array(Vec<Value>, VarType),
+    Null,
+    /// struct type name, shape, props
+    Struct(String, StructShape, Vec<StructProp>),
 }
 impl Value {
     pub fn get_str(&self) -> String {
@@ -94,12 +89,24 @@ impl Value {
                 let res = if *v { "true" } else { "false" };
                 res.to_string()
             }
-            Value::Array(arr) => get_value_arr_str(arr),
-            Value::Struct(_, props) => {
-                let mut res = String::from("{");
+            Value::Array(arr, _) => get_value_arr_str(arr),
+            Value::Null => String::from("null"),
+            Value::Struct(_, _, props) => {
+                let mut res = String::from("{\n");
 
-                for prop in props.iter() {
-                    res.push_str(prop.get_str().as_str());
+                for (i, prop) in props.iter().enumerate() {
+                    let temp_str = prop.name.clone().to_owned() + ": " + prop.get_str().as_str();
+                    let new_lines: Vec<String> = temp_str
+                        .split("\n")
+                        .map(|line| "\t".to_owned() + line)
+                        .collect();
+                    let mut new_str = new_lines.join("");
+
+                    if i < props.len() - 1 {
+                        new_str = new_str.to_owned() + "\n";
+                    }
+
+                    res.push_str(new_str.as_str());
                 }
 
                 res.push_str("\n}");
@@ -117,17 +124,10 @@ impl Value {
             Value::Long(_) => String::from("long"),
             Value::String(_) => String::from("string"),
             Value::Bool(_) => String::from("bool"),
-            Value::Struct(_, _) => String::from("struct"),
-            Value::Array(arr) => {
-                let mut arr_type = if arr.len() > 0 {
-                    arr[0].get_enum_str()
-                } else {
-                    String::from("unknown")
-                };
-
-                arr_type.push_str("[]");
-
-                arr_type
+            Value::Struct(_, _, _) => String::from("struct"),
+            Value::Null => String::from("null"),
+            Value::Array(arr, arr_type) => {
+                format!("{:?}[{:?}]", arr_type, arr)
             }
         }
     }
@@ -137,14 +137,14 @@ impl Value {
 pub enum AstNode {
     StatementSeq(Vec<Rc<RefCell<AstNode>>>),
     /// type, name, value node
-    MakeVar(VarType, Token, Box<AstNode>),
+    MakeVar(VarType, Token, Option<Box<AstNode>>),
     SetVar(Token, Box<AstNode>),
     Token(Token),
     CallFunc(String, Vec<AstNode>),
     Bang(Box<AstNode>),
     Exp(Vec<Box<AstNode>>),
     If(Box<AstNode>, Box<AstNode>),
-    Array(Vec<AstNode>),
+    Array(Vec<AstNode>, VarType),
     AccessStructProp(Token, Vec<AstNode>),
     /// to, node
     Cast(VarType, Box<AstNode>),
@@ -161,8 +161,8 @@ pub enum AstNode {
     IndexArr(Token, Box<AstNode>),
     /// arr ident, index, value
     SetArrIndex(Token, Box<AstNode>, Box<AstNode>),
-    /// name, shape
-    DefineStruct(String, StructShape),
+    /// struct type name, shape, props
+    CreateStruct(String, StructShape, Vec<(String, AstNode)>),
 }
 
 impl AstNode {
@@ -171,7 +171,9 @@ impl AstNode {
     }
     pub fn get_str(&self) -> String {
         match &self {
-            AstNode::DefineStruct(name, shape) => unimplemented!(),
+            AstNode::CreateStruct(name, _, props) => {
+                format!("creating struct named {} with {:?}", name, props)
+            }
             AstNode::SetArrIndex(arr, index, value) => {
                 format!(
                     "setting {} to {} at {}",
@@ -209,7 +211,7 @@ impl AstNode {
             AstNode::AccessStructProp(struct_token, prop) => {
                 format!("Accessing {:?} on {}", prop, struct_token.get_str())
             }
-            AstNode::Array(arr) => format!("{:?}", arr),
+            AstNode::Array(arr, _) => format!("{:?}", arr),
             AstNode::If(condition, node) => {
                 format!("If: {} ::then:: {}", condition.get_str(), node.get_str())
             }
@@ -224,7 +226,11 @@ impl AstNode {
                 format!(
                     "Setting {} to {} as {}",
                     name.get_str(),
-                    value.get_str().as_str(),
+                    if let Some(val) = value {
+                        val.get_str()
+                    } else {
+                        String::from("None")
+                    },
                     var_type.get_str()
                 )
             }
@@ -321,9 +327,40 @@ pub fn get_ast_node<'a>(
         }
 
         let node_type = match tokens[0].as_ref().unwrap() {
+            Token::LAngle => {
+                let first_token = tokens[1].as_ref().unwrap().clone();
+                let mut type_tokens = tokens_to_delimiter(tokens, 1, ">");
+                let type_val = get_type_expression(&mut type_tokens, structs);
+
+                tokens.drain(0..type_tokens.len() + 2);
+
+                match tokens[0].as_ref().unwrap() {
+                    Token::LBracket => Some(create_arr(structs, tokens, type_val)),
+                    Token::LBrace => {
+                        if type_tokens.len() != 1 {
+                            panic!("Type of struct can only be a struct type name");
+                        }
+
+                        if let Token::Identifier(ident) = first_token {
+                            match structs.available_structs.get(&ident) {
+                                Some(shape) => Some(create_struct_node(
+                                    tokens,
+                                    structs,
+                                    shape.clone(),
+                                    &ident.clone(),
+                                )),
+                                None => panic!("Struct {} does not exist", ident),
+                            }
+                        } else {
+                            panic!("Expected struct type name for struct type definition");
+                        }
+                    }
+                    _ => panic!("Unexpected type token"),
+                }
+            }
             Token::Type(_) => match tokens[1].as_ref().unwrap() {
                 Token::LParen => Some(create_cast_node(structs, tokens)),
-                _ => Some(create_make_var_node(structs, tokens)),
+                _ => Some(create_make_var_node(structs, tokens, false)),
             },
             Token::Identifier(ident) => match tokens[1].as_ref().unwrap() {
                 Token::LParen => Some(create_func_call_node(structs, tokens)),
@@ -342,61 +379,66 @@ pub fn get_ast_node<'a>(
                     Some(AstNode::AccessStructProp(struct_token, access_token_nodes))
                 }
                 Token::LBracket => {
-                    let mut index_tokens = tokens_to_delimiter(tokens, 2, "]");
-                    let arr_index_end = 3 + index_tokens.len();
+                    if structs.available_structs.contains_key(ident) {
+                        unimplemented!()
+                    } else {
+                        let mut index_tokens = tokens_to_delimiter(tokens, 2, "]");
+                        let arr_index_end = 3 + index_tokens.len();
 
-                    Some(
-                        if let Some(index_node) = get_ast_node(structs, &mut index_tokens) {
-                            tokens.drain(1..arr_index_end);
+                        Some(
+                            if let Some(index_node) = get_ast_node(structs, &mut index_tokens) {
+                                tokens.drain(1..arr_index_end);
 
-                            if let Token::Semicolon =
-                                tokens.last().as_ref().unwrap().as_ref().unwrap()
-                            {
-                                tokens.remove(tokens.len() - 1);
-                            }
+                                if let Token::Semicolon =
+                                    tokens.last().as_ref().unwrap().as_ref().unwrap()
+                                {
+                                    tokens.remove(tokens.len() - 1);
+                                }
 
-                            if tokens.len() > 1 {
-                                match tokens[1].as_ref().unwrap() {
-                                    Token::EqSet => {
-                                        let arr_var_name = tokens.remove(0);
-                                        tokens.remove(0);
+                                if tokens.len() > 1 {
+                                    match tokens[1].as_ref().unwrap() {
+                                        Token::EqSet => {
+                                            let arr_var_name = tokens.remove(0);
+                                            tokens.remove(0);
 
-                                        if let Some(value_node) = get_ast_node(structs, tokens) {
-                                            AstNode::SetArrIndex(
-                                                arr_var_name.unwrap(),
-                                                Box::new(index_node),
-                                                Box::new(value_node),
-                                            )
-                                        } else {
-                                            panic!("expected value to set at index");
+                                            if let Some(value_node) = get_ast_node(structs, tokens)
+                                            {
+                                                AstNode::SetArrIndex(
+                                                    arr_var_name.unwrap(),
+                                                    Box::new(index_node),
+                                                    Box::new(value_node),
+                                                )
+                                            } else {
+                                                panic!("expected value to set at index");
+                                            }
                                         }
+                                        _ => unimplemented!(),
                                     }
-                                    _ => unimplemented!(),
+                                } else {
+                                    AstNode::IndexArr(
+                                        tokens[0].take().unwrap(),
+                                        Box::new(index_node),
+                                    )
                                 }
                             } else {
-                                AstNode::IndexArr(tokens[0].take().unwrap(), Box::new(index_node))
-                            }
-                        } else {
-                            panic!("Expected value to index array with");
-                        },
-                    )
+                                panic!("Expected value to index array with");
+                            },
+                        )
+                    }
                 }
                 _ => {
-                    println!("{:?}", structs.available_structs);
-                    let pos = structs.available_structs.iter().position(|s| s == ident);
-                    if pos.is_some() {
-                        // handle create struct variable
+                    let includes_struct = structs.available_structs.contains_key(ident);
+                    if includes_struct {
+                        Some(create_make_var_node(structs, tokens, true))
                     } else {
-                        // do smth else
+                        panic!("{} is not a valid type", ident);
                     }
-                    unimplemented!()
                 }
             },
             Token::NewLine => None,
             Token::Bang => Some(create_bang_bool(structs, tokens)),
             Token::String(_) => Some(AstNode::Token(tokens[0].take().unwrap())),
-            Token::Keyword(keyword) => Some(create_keyword_node(tokens, structs, keyword.clone())),
-            Token::LBracket => Some(create_arr(structs, tokens)),
+            Token::Keyword(keyword) => create_keyword_node(tokens, structs, keyword.clone()),
             _ => {
                 panic!("Token not implemented: {:?}", tokens)
             }
