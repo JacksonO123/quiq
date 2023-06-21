@@ -49,7 +49,7 @@ pub fn get_value_arr_str(values: &Vec<Value>) -> String {
             }
         }
 
-        for i in values.len() - 1 - size_buffer..values.len() {
+        for i in values.len() - size_buffer..values.len() {
             res.push_str(values[i].get_str().as_str());
             if i < values.len() - 1 {
                 res.push_str(", ");

@@ -1,4 +1,11 @@
-int[][] v = <int[]>[<int>[2, 23], <int>[1, 4]];
-v.push(<int>[9, 10]);
+int[][] v = <int[]>[];
+
+for (i; 0; 100) {
+  int[] temp = <int>[];
+  for (j; 0; 100) {
+    temp.push(j);
+  }
+  v.push(temp);
+}
 
 print(v);
