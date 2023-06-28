@@ -254,7 +254,7 @@ fn create_struct_shape<'a>(
                 let mut prop_type = match prop[2].as_ref().unwrap() {
                     Token::Type(t) => t.clone(),
                     Token::Identifier(val) => match structs.available_structs.get(val) {
-                        Some(shape) => VarType::Struct(name.clone(), shape.clone()),
+                        Some(shape) => VarType::Struct(val.clone(), shape.clone()),
                         None => panic!("Unexpected struct type name {}", val),
                     },
                     _ => panic!("Expected type or identifier for struct property type"),
@@ -761,8 +761,8 @@ pub fn push_to_array<'a>(
             if !ensure_type(&arr_type, &val) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
-                    arr_type,
                     type_from_value(&val),
+                    arr_type,
                 );
             }
             arr.push(val);
@@ -1455,11 +1455,6 @@ pub fn create_struct_node(
     }
 
     while start < tokens.len() {
-        if tokens[start].as_ref().is_none() {
-            start += 3;
-            continue;
-        }
-
         let mut property = tokens_to_delimiter(tokens, start, ",");
 
         if let Token::RBrace = property[property.len() - 1].as_ref().unwrap() {
@@ -1476,6 +1471,8 @@ pub fn create_struct_node(
             panic!("Expected identifier for struct property name");
         };
 
+        let len = property.len();
+
         property.remove(0);
         property.remove(0);
 
@@ -1486,7 +1483,7 @@ pub fn create_struct_node(
             panic!("Expected value for struct property");
         }
 
-        start += property.len() + 3;
+        start += len + 1;
     }
 
     AstNode::CreateStruct(name.clone(), shape, props)

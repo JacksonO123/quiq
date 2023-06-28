@@ -412,7 +412,10 @@ pub fn eval_node<'a>(
                     let val_type_option = shape.props.get(name);
                     if let Some(val_type) = val_type_option {
                         if !ensure_type(val_type, &value) {
-                            panic!("bad");
+                            panic!(
+                                "Type mismatch in struct creation. Expected {:?} found {:?}",
+                                val_type, value
+                            );
                         }
                     }
 
@@ -641,6 +644,22 @@ pub fn eval_node<'a>(
                                 "length" => Some(EvalValue::Value(Value::Usize(vals.len()))),
                                 _ => unimplemented!(),
                             },
+                            _ => panic!("Unexpected method: {:?}", t),
+                        },
+                        _ => panic!("Unexpected operation: {:?}", prop),
+                    }
+                }
+                Value::Struct(name, _, props) => {
+                    match &prop.get(0).expect("Expected property to access on Array") {
+                        AstNode::Token(t) => match t {
+                            Token::Identifier(ident) => {
+                                for prop in props.iter() {
+                                    if prop.name == *ident {
+                                        return Some(EvalValue::Value(prop.value.clone()));
+                                    }
+                                }
+                                panic!("Property {} not found on struct {}", ident, name)
+                            }
                             _ => panic!("Unexpected method: {:?}", t),
                         },
                         _ => panic!("Unexpected operation: {:?}", prop),

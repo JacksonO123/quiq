@@ -1,11 +1,7 @@
-int[][] v = <int[]>[];
+int[] h = <int>[];
 
-for (i; 0; 100) {
-  int[] temp = <int>[];
-  for (j; 0; 100) {
-    temp.push(j);
-  }
-  v.push(temp);
+for (i; 0; 1000000) {
+  h.push(i);
 }
 
-print(v);
+print(h);

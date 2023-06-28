@@ -100,7 +100,7 @@ impl Value {
                         .split("\n")
                         .map(|line| "\t".to_owned() + line)
                         .collect();
-                    let mut new_str = new_lines.join("");
+                    let mut new_str = new_lines.join("\n");
 
                     if i < props.len() - 1 {
                         new_str = new_str.to_owned() + "\n";
@@ -270,6 +270,7 @@ impl AstNode {
     }
 }
 
+#[derive(Debug)]
 pub struct Ast {
     pub node: Rc<RefCell<AstNode>>,
 }

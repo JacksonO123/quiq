@@ -43,7 +43,8 @@ fn main() {
     let tree_start = Instant::now();
     let tree = generate_tree(&mut struct_info, &mut tokens);
     let tree_end = tree_start.elapsed();
-    // tree.print();
+
+    // println!("{:#?}", tree);
 
     let mut vars: HashMap<String, Rc<RefCell<VarValue>>> = HashMap::new();
     let functions = Rc::new(RefCell::new(Vec::new()));
