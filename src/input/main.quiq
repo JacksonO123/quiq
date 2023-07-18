@@ -1,33 +1,25 @@
-struct Obj {
+struct obj {
   value: int;
   other: string[];
 }
 
-struct Temp {
+struct temp {
   name: string;
   number: int;
   skills: long[];
-  more: Obj;
+  more: obj;
 }
 
-print(<Temp>{
+temp str = <temp>{
   name: "hi",
   number: 123,
   skills: <long>[long(123), long(124)],
-  more: <Obj>{
+  more: <obj>{
     value: 10,
     other: <string>["thing", "test", "ok"]
   }
-});
+};
 
-// Temp str = <Temp>{
-//   name: "hi",
-//   number: 123,
-//   skills: <long>[long(123), long(124)],
-//   more: <Obj>{
-//     value: 10,
-//     other: <string>["thing", "test", "ok"]
-//   }
-// };
+str.more.value = 2 + 1;
 
-// print(str.more);
+print(str);

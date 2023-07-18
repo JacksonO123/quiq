@@ -1,7 +1,23 @@
-int[] h = <int>[];
-
-for (i; 0; 1000000) {
-  h.push(i);
+struct obj {
+  value: int;
+  other: string[];
 }
 
-print(h);
+struct temp {
+  name: string;
+  number: int;
+  skills: long[];
+  more: obj;
+}
+
+temp str = <temp>{
+  name: "hi",
+  number: 123,
+  skills: <long>[long(123), long(124)],
+  more: <obj>{
+    value: 10,
+    other: <string>["thing", "test", "ok"]
+  }
+};
+
+print(str.more.value);

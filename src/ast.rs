@@ -75,10 +75,12 @@ pub enum Value {
     Null,
     /// struct type name, shape, props
     Struct(String, StructShape, Vec<StructProp>),
+    Ref(Rc<RefCell<Value>>),
 }
 impl Value {
     pub fn get_str(&self) -> String {
         match self {
+            Value::Ref(v) => v.as_ref().borrow().get_str(),
             Value::Usize(v) => v.to_string(),
             Value::String(v) => v.clone(),
             Value::Float(v) => v.to_string(),
@@ -117,6 +119,7 @@ impl Value {
     }
     pub fn get_enum_str(&self) -> String {
         match self {
+            Value::Ref(_) => String::from("ref"),
             Value::Int(_) => String::from("int"),
             Value::Usize(_) => String::from("usize"),
             Value::Float(_) => String::from("float"),
@@ -377,6 +380,7 @@ pub fn get_ast_node<'a>(
                         let res = get_ast_node(structs, token_clone).unwrap();
                         access_token_nodes.push(res);
                     }
+
                     Some(AstNode::AccessStructProp(struct_token, access_token_nodes))
                 }
                 Token::LBracket => {

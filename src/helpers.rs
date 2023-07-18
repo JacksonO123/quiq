@@ -126,7 +126,21 @@ pub fn create_set_var_node<'a>(
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
 ) -> AstNode {
-    let mut value_to_set = tokens_to_delimiter(tokens, 2, ";");
+    let eq_pos = tokens
+        .iter()
+        .position(|s| {
+            if let Some(tok) = s {
+                match tok {
+                    Token::EqSet => true,
+                    _ => false,
+                }
+            } else {
+                false
+            }
+        })
+        .unwrap();
+
+    let mut value_to_set = tokens_to_delimiter(tokens, eq_pos + 1, ";");
     let node = get_ast_node(structs, &mut value_to_set);
     if node.is_none() {
         panic!("Invalid value, expected value to set variable");
@@ -671,6 +685,13 @@ pub fn create_arr<'a>(
 
 pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
     match val {
+        Value::Ref(ref_ptr) => match var_type {
+            VarType::Ref(ref_type) => {
+                let ref_value = ref_ptr.as_ref().borrow();
+                ensure_type(ref_type, val)
+            }
+            _ => false,
+        },
         Value::Null => match var_type {
             VarType::Null => true,
             _ => false,
@@ -772,6 +793,10 @@ pub fn push_to_array<'a>(
 
 fn type_from_value(val: &Value) -> VarType {
     match val {
+        Value::Ref(ref_ptf) => {
+            let ref_type = type_from_value(&ref_ptf.as_ref().borrow());
+            VarType::Ref(Box::new(ref_type))
+        }
         Value::Null => VarType::Null,
         Value::Usize(_) => VarType::Usize,
         Value::String(_) => VarType::String,
@@ -801,8 +826,15 @@ pub fn create_cast_node<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<To
     }
 }
 
+macro_rules! cast_panic {
+    ($from:expr, $to:expr) => {
+        panic!("Cannot convert {} to {}", $from, $to)
+    };
+}
+
 pub fn cast(to_type: &VarType, val: Value) -> Value {
     match val {
+        Value::Ref(_) => panic!("Cannot cast ref"),
         Value::Null => panic!("Cannot cast null"),
         Value::Usize(v) => match to_type {
             VarType::Usize => val,
@@ -817,12 +849,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 } else if v == 1 {
                     Value::Bool(true)
                 } else {
-                    panic!("Cannot convert usize to bool")
+                    cast_panic!("usize", "bool")
                 }
             }
-            VarType::Array(_) => panic!("Cannot convert usize to array"),
-            VarType::Struct(_, _) => panic!("Cannot convert usize to struct"),
-            VarType::Null => panic!("Cannot convert usize to null"),
+            VarType::Array(_) => cast_panic!("usize", "array"),
+            VarType::Struct(_, _) => cast_panic!("usize", "struct"),
+            VarType::Null => cast_panic!("usize", "null"),
+            VarType::Ref(_) => cast_panic!("usize", "ref"),
         },
         Value::String(v) => match to_type {
             VarType::Usize => {
@@ -838,9 +871,10 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Long => Value::Long(v.parse::<i64>().expect("Error parsing string to long")),
             VarType::String => Value::String(v),
             VarType::Bool => Value::Bool(v.parse::<bool>().expect("Error parsing string to bool")),
-            VarType::Array(_) => panic!("Cannot convert string to array"),
-            VarType::Struct(_, _) => panic!("Cannot convert string to struct"),
-            VarType::Null => panic!("Cannot convert string to null"),
+            VarType::Array(_) => cast_panic!("string", "array"),
+            VarType::Struct(_, _) => cast_panic!("string", "struct"),
+            VarType::Null => cast_panic!("string", "null"),
+            VarType::Ref(_) => cast_panic!("string", "ref"),
         },
         Value::Int(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -858,9 +892,10 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                     panic!("Cannot convert int to bool")
                 }
             }
-            VarType::Array(_) => panic!("Cannot convert int to array"),
-            VarType::Struct(_, _) => panic!("Cannot convert int to struct"),
-            VarType::Null => panic!("Cannot convert int to null"),
+            VarType::Array(_) => cast_panic!("int", "array"),
+            VarType::Struct(_, _) => cast_panic!("int", "struct"),
+            VarType::Null => cast_panic!("int", "null"),
+            VarType::Ref(_) => cast_panic!("int", "ref"),
         },
         Value::Float(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -878,9 +913,10 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                     panic!("Cannot convert float to bool")
                 }
             }
-            VarType::Array(_) => panic!("Cannot convert float to array"),
-            VarType::Struct(_, _) => panic!("Cannot convert float to struct"),
-            VarType::Null => panic!("Cannot convert float to null"),
+            VarType::Array(_) => cast_panic!("float", "array"),
+            VarType::Struct(_, _) => cast_panic!("float", "struct"),
+            VarType::Null => cast_panic!("float", "null"),
+            VarType::Ref(_) => cast_panic!("float", "ref"),
         },
         Value::Double(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -895,12 +931,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 } else if v == 1.0 {
                     Value::Bool(true)
                 } else {
-                    panic!("Cannot convert double to bool")
+                    cast_panic!("double", "bool")
                 }
             }
-            VarType::Array(_) => panic!("Cannot convert double to array"),
-            VarType::Struct(_, _) => panic!("Cannot convert double to struct"),
-            VarType::Null => panic!("Cannot convert double to null"),
+            VarType::Array(_) => cast_panic!("double", "array"),
+            VarType::Struct(_, _) => cast_panic!("double", "struct"),
+            VarType::Null => cast_panic!("double", "null"),
+            VarType::Ref(_) => cast_panic!("double", "ref"),
         },
         Value::Long(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -918,9 +955,10 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                     panic!("Cannot convert long to bool")
                 }
             }
-            VarType::Array(_) => panic!("Cannot convert long to array"),
-            VarType::Struct(_, _) => panic!("Cannot convert long to struct"),
-            VarType::Null => panic!("Cannot convert long to null"),
+            VarType::Array(_) => cast_panic!("long", "array"),
+            VarType::Struct(_, _) => cast_panic!("long", "struct"),
+            VarType::Null => cast_panic!("long", "null"),
+            VarType::Ref(_) => cast_panic!("long", "ref"),
         },
         Value::Bool(v) => {
             let num_val = if v { 1 } else { 0 };
@@ -932,22 +970,24 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 VarType::Long => Value::Long(num_val as i64),
                 VarType::String => Value::String(v.to_string()),
                 VarType::Bool => val,
-                VarType::Array(_) => panic!("Cannot convert bool to array"),
-                VarType::Struct(_, _) => panic!("Cannot convert bool to struct"),
-                VarType::Null => panic!("Cannot convert bool to null"),
+                VarType::Array(_) => cast_panic!("bool", "array"),
+                VarType::Struct(_, _) => cast_panic!("bool", "struct"),
+                VarType::Null => cast_panic!("bool", "null"),
+                VarType::Ref(_) => cast_panic!("bool", "ref"),
             }
         }
         Value::Array(arr, _) => match to_type {
-            VarType::Usize => panic!("Cannot convert array to usize"),
-            VarType::Int => panic!("Cannot convert array to int"),
-            VarType::Float => panic!("Cannot convert array to float"),
-            VarType::Double => panic!("Cannot convert array to double"),
-            VarType::Long => panic!("Cannot convert array to long"),
+            VarType::Usize => cast_panic!("array", "usize"),
+            VarType::Int => cast_panic!("array", "int"),
+            VarType::Float => cast_panic!("array", "float"),
+            VarType::Double => cast_panic!("array", "double"),
+            VarType::Long => cast_panic!("array", "long"),
             VarType::String => Value::String(get_value_arr_str(&arr)),
-            VarType::Bool => panic!("Cannot convert array to bool"),
+            VarType::Bool => cast_panic!("array", "bool"),
             VarType::Array(_) => unimplemented!(),
-            VarType::Struct(_, _) => panic!("Cannot convert array to struct"),
-            VarType::Null => panic!("Cannot convert array to null"),
+            VarType::Struct(_, _) => cast_panic!("array", "struct"),
+            VarType::Null => cast_panic!("array", "null"),
+            VarType::Ref(_) => cast_panic!("array", "ref"),
         },
         Value::Struct(_, _, _) => panic!("Cannot cast structs"),
     }
@@ -979,10 +1019,19 @@ pub fn get_struct_access_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<
             && match tokens[i].as_ref().unwrap() {
                 Token::Period => {
                     res.push(vec![]);
-                    false
+                    i += 1;
+                    continue;
                 }
                 Token::Identifier(_) => false,
                 Token::LParen => false,
+                Token::EqSet => {
+                    // let index = res.len() - 1;
+                    // res[index].push(Some(tokens[i].take().unwrap()));
+                    // res.push(vec![]);
+                    // i += 1;
+                    // continue;
+                    false
+                }
                 _ => true,
             }
         {
@@ -995,8 +1044,8 @@ pub fn get_struct_access_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<
                 }
             {
                 res[index].push(Some(tokens[i + 1].take().unwrap()));
+                break;
             }
-            break;
         } else {
             let index = res.len() - 1;
             res[index].push(Some(tokens[i].take().unwrap()));
@@ -1212,6 +1261,7 @@ macro_rules! comp {
                     Value::Null => Ok(true),
                     _ => Ok(false),
                 }
+                Value::Ref(_) => Err(String::from("Cannot compare refs"))
             }
         }
     };
@@ -1227,7 +1277,8 @@ macro_rules! comp {
                 )*
                 Value::Array(_, _) => Err(String::from("Arrays can only be compared with `==` operator")),
                 Value::Struct(_, _, _) => Err(String::from("Structs can only be compared with `==` operator")),
-                Value::Null => Err(String::from("Null can only be compared with `==` operator"))
+                Value::Null => Err(String::from("Null can only be compared with `==` operator")),
+                Value::Ref(_) => Err(String::from("Cannot compare refs"))
             }
         }
     };
@@ -1287,13 +1338,15 @@ fn compare_struct_values(left: &Vec<StructProp>, right: &Vec<StructProp>) -> boo
         let mut found = false;
 
         for right_val in right.iter() {
-            if left_val.name == right_val.name
-                && match comp_bind!(&left_val.value, &right_val.value, ==) {
+            if left_val.name == right_val.name {
+                let left = left_val.value.as_ref().borrow().clone();
+                let right = left_val.value.as_ref().borrow().clone();
+                if match comp_bind!(&left, &right, ==) {
                     Ok(val) => val,
                     Err(_) => false,
+                } {
+                    found = true;
                 }
-            {
-                found = true;
             }
         }
 
@@ -1487,4 +1540,24 @@ pub fn create_struct_node(
     }
 
     AstNode::CreateStruct(name.clone(), shape, props)
+}
+
+pub fn set_struct_prop(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    props: &mut Vec<StructProp>,
+    token: &Token,
+    value: EvalValue,
+) {
+    let name = match token {
+        Token::Identifier(ident) => ident,
+        _ => panic!("Expected identifier to access struct with"),
+    };
+
+    for prop in props.iter_mut() {
+        if prop.name == *name {
+            let value = get_eval_value(vars, value);
+            prop.value = Rc::new(RefCell::new(value));
+            break;
+        }
+    }
 }
