@@ -671,6 +671,7 @@ pub fn eval_node<'a>(
                         match path_node {
                             AstNode::Token(tok) => match tok {
                                 Token::Identifier(ident) => {
+                                    println!("{}, {}, {:#?}", ident, current_name, props);
                                     let mut temp_ptr: Option<Rc<RefCell<Value>>> = None;
                                     {
                                         if depth > 0 {
@@ -696,11 +697,9 @@ pub fn eval_node<'a>(
                                         }
                                     }
 
-                                    println!("{}\n{:#?}", ident, temp_ptr);
-
                                     if let Some(ptr) = temp_ptr {
                                         current_struct = ptr;
-                                    } else {
+                                    } else if prop_val.is_none() {
                                         panic!(
                                             "Property \"{}\" not found on struct {}",
                                             ident, current_name

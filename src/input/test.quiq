@@ -1,7 +1,13 @@
-int[] v = <int>[];
-
-for (i; 0; 10) {
-  v.push(i);
+struct Test {
+  arr: int[];
 }
 
-print(v);
+Test t = <Test>{
+  arr: <int>[]
+}
+
+for (i; 0; 10) {
+  // t.arr.push(i);
+}
+
+print(t.arr);
