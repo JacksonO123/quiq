@@ -13,7 +13,7 @@ This time written in rust
 - [ ] Add ref as a value type (basically a pointer) (not sure when this should be added (not v important rn))
 - [ ] While loops
 - [ ] Functions
-- [ ] Garbage collector (maybe ?)
+- [ ] Manual memory utilities
 
 ## Features
 
@@ -32,10 +32,14 @@ This time written in rust
   - Condition
   - If body
 - Function call
-  - Call with `n` number of params
+  - Call (builtin functions) with `n` number of params
 - Type casting
 - Arrays
   - Type enforced
   - Properties
     - Push
     - Length
+- Structs
+  - Struct schema defined
+  - Schema enforced
+  - properties can be read and mutated
