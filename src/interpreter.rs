@@ -671,7 +671,6 @@ pub fn eval_node<'a>(
                         match path_node {
                             AstNode::Token(tok) => match tok {
                                 Token::Identifier(ident) => {
-                                    println!("{}, {}, {:#?}", ident, current_name, props);
                                     let mut temp_ptr: Option<Rc<RefCell<Value>>> = None;
                                     {
                                         if depth > 0 {
@@ -726,8 +725,6 @@ pub fn eval_node<'a>(
                                     {
                                         set_struct_prop(vars, props, tok, value);
                                     }
-                                    // println!("changing {:?} {:?}", tok, value);
-                                    // println!("{:#?}", props);
                                 } else {
                                     panic!("Expected value to set to struct property");
                                 }
