@@ -3,7 +3,7 @@ use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 use crate::{
     ast::{Ast, AstNode, StructShape, Value},
     helpers::{
-        cast, compare, ensure_type, flatten_exp, get_eval_value, index_arr, make_var,
+        cast, compare, ensure_type, flatten_exp, get_eval_value, get_prop_ptr, index_arr, make_var,
         push_to_array, set_index_arr, set_struct_prop, set_var_value, ExpValue,
     },
     tokenizer::{OperatorType, Token},
@@ -125,16 +125,21 @@ impl VarType {
 
 #[derive(Debug)]
 pub struct VarValue {
-    pub value: Value,
+    pub value: Rc<RefCell<Value>>,
     pub scope: usize,
     pub name: String,
 }
 impl VarValue {
     pub fn new(name: String, value: Value, scope: usize) -> Self {
-        Self { name, value, scope }
+        let ptr = Rc::new(RefCell::new(value));
+        Self {
+            name,
+            value: ptr,
+            scope,
+        }
     }
     pub fn get_str(&self) -> String {
-        format!("Var: {} -> ", self.name).to_owned() + self.value.get_str().as_str()
+        format!("Var: {} -> ", self.name).to_owned() + self.value.borrow().get_str().as_str()
     }
 }
 
@@ -372,7 +377,7 @@ macro_rules! for_loop {
                 current += inc;
 
                 let var_ptr = $vars.get(&$name).unwrap();
-                var_ptr.borrow_mut().value = Value::$variant(current);
+                *var_ptr.borrow_mut().value.borrow_mut() = Value::$variant(current);
             }
         } else {
             while to_num < current {
@@ -388,7 +393,7 @@ macro_rules! for_loop {
                 current += inc;
 
                 let var_ptr = $vars.get(&$name).unwrap();
-                var_ptr.borrow_mut().value = Value::$variant(current);
+                *var_ptr.borrow_mut().value.borrow_mut() = Value::$variant(current);
             }
         }
     };
@@ -620,10 +625,11 @@ pub fn eval_node<'a>(
                 panic!("Error in struct property access, expected identifier");
             };
 
-            let var_value = Rc::new(RefCell::new(var_ptr.borrow().value.to_owned()));
+            let var_value = &*var_ptr.borrow_mut();
+            let value = &var_value.value;
 
-            let res = match var_value.borrow().to_owned() {
-                Value::Array(ref mut vals, mut arr_type) => {
+            let res = match &mut *value.borrow_mut() {
+                Value::Array(ref mut vals, arr_type) => {
                     match &access_path
                         .get(0)
                         .expect("Expected property to access on Array")
@@ -636,7 +642,7 @@ pub fn eval_node<'a>(
                                     structs,
                                     scope,
                                     vals,
-                                    &mut arr_type,
+                                    arr_type,
                                     args,
                                     stdout,
                                 );
@@ -654,46 +660,52 @@ pub fn eval_node<'a>(
                         _ => panic!("Unexpected operation: {:?}", access_path),
                     }
                 }
-                Value::Struct(name, _, _) => {
-                    let mut current_struct = Rc::clone(&var_value);
+                Value::Struct(name, _, ref mut props) => {
+                    let mut current_struct = Rc::clone(&value);
                     let mut prop_val = None;
                     let mut current_name = name.clone();
 
                     let mut is_set = false;
 
-                    'outer: for path_node in access_path.iter() {
+                    for (depth, path_node) in access_path.iter().enumerate() {
                         match path_node {
                             AstNode::Token(tok) => match tok {
                                 Token::Identifier(ident) => {
-                                    let mut props = if let Value::Struct(_, _, props) =
-                                        current_struct.borrow().to_owned()
+                                    let mut temp_ptr: Option<Rc<RefCell<Value>>> = None;
                                     {
-                                        props
-                                    } else {
-                                        panic!("Expected struct to access prop on");
-                                    };
-                                    for prop in props.iter_mut() {
-                                        if prop.name == *ident {
-                                            prop_val = Some(prop.value.clone());
+                                        if depth > 0 {
+                                            let mut current_borrow = current_struct.borrow_mut();
+                                            if let Value::Struct(_, _, props) = &mut *current_borrow
+                                            {
+                                                let (res_ptr, res_value, new_name) =
+                                                    get_prop_ptr(props, ident);
 
-                                            let temp_prop = prop.value.to_owned();
-                                            let temp_borrow = temp_prop.borrow();
-                                            let temp_owned = temp_borrow.to_owned();
-                                            match temp_owned {
-                                                Value::Struct(new_name, _, _) => {
-                                                    current_name = new_name.clone();
-                                                    current_struct = Rc::clone(&temp_prop);
-                                                }
-                                                _ => {}
+                                                temp_ptr = res_ptr;
+                                                prop_val = res_value;
+                                                current_name = new_name;
+                                            } else {
+                                                panic!("Expected struct to access prop on");
                                             }
+                                        } else {
+                                            let (res_ptr, res_value, new_name) =
+                                                get_prop_ptr(props, ident);
 
-                                            continue 'outer;
+                                            temp_ptr = res_ptr;
+                                            prop_val = res_value;
+                                            current_name = new_name;
                                         }
                                     }
-                                    panic!(
-                                        "Property \"{}\" not found on struct {}",
-                                        ident, current_name
-                                    )
+
+                                    println!("{}\n{:#?}", ident, temp_ptr);
+
+                                    if let Some(ptr) = temp_ptr {
+                                        current_struct = ptr;
+                                    } else {
+                                        panic!(
+                                            "Property \"{}\" not found on struct {}",
+                                            ident, current_name
+                                        )
+                                    }
                                 }
                                 _ => panic!("Unexpected method: {:?}", tok),
                             },
@@ -710,12 +722,13 @@ pub fn eval_node<'a>(
                                 );
 
                                 if let Some(value) = eval_val {
-                                    let mut current_struct_borrow = current_struct.borrow_mut();
                                     if let Value::Struct(_, _, ref mut props) =
-                                        &mut *current_struct_borrow
+                                        &mut *current_struct.borrow_mut()
                                     {
                                         set_struct_prop(vars, props, tok, value);
                                     }
+                                    // println!("changing {:?} {:?}", tok, value);
+                                    // println!("{:#?}", props);
                                 } else {
                                     panic!("Expected value to set to struct property");
                                 }
@@ -778,12 +791,14 @@ pub fn eval_node<'a>(
                     EvalValue::Token(tok) => match tok {
                         Token::Identifier(ident) => {
                             let var_ptr = get_var_ptr(vars, &ident);
-                            let val_ref = var_ptr.borrow();
-                            let val = &val_ref.value;
-                            match val {
-                                Value::Bool(b) => *b,
+                            let val = var_ptr.borrow();
+
+                            let res = match *val.value.borrow() {
+                                Value::Bool(b) => b,
                                 _ => panic!("Error in `if`, expected boolean"),
-                            }
+                            };
+
+                            res
                         }
                         _ => {
                             let token_value = value_from_token(&tok, None);

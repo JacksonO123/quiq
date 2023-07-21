@@ -389,9 +389,9 @@ pub fn set_var_value<'a>(
     if let Some(res) = res_option {
         let mut value_ref = res.borrow_mut();
         let var_value = &value_ref.value;
-        let var_value_type = type_from_value(var_value);
+        let var_value_type = type_from_value(&*(var_value.borrow()));
         if ensure_type(&var_value_type, &value) {
-            value_ref.value = value;
+            *value_ref.value.borrow_mut() = value;
         } else {
             panic!(
                 "expected type: {:?} found {:?}",
@@ -591,9 +591,9 @@ pub fn flatten_exp<'a>(
                     Token::Identifier(ident) => {
                         let var_ptr = get_var_ptr(vars, &ident);
                         let var_ref = var_ptr.borrow();
-                        let var_value = var_ref.value.clone();
+                        let var_value = Rc::clone(&var_ref.value);
 
-                        ExpValue::Value(var_value)
+                        ExpValue::Value(Value::Ref(var_value))
                     }
                     _ => ExpValue::Value(value_from_token(&tok, None)),
                 },
@@ -757,11 +757,41 @@ pub fn get_eval_value(vars: &mut HashMap<String, Rc<RefCell<VarValue>>>, val: Ev
             Token::Identifier(ident) => {
                 let var_ptr = get_var_ptr(vars, &ident);
                 let var_ref = var_ptr.borrow();
-                var_ref.value.clone()
+                let val = var_ref.value.borrow();
+                val.clone()
             }
             _ => panic!("Unexpected token: {:?}", t),
         },
     }
+}
+
+pub fn get_prop_ptr(
+    props: &mut Vec<StructProp>,
+    name: &String,
+) -> (
+    Option<Rc<RefCell<Value>>>,
+    Option<Rc<RefCell<Value>>>,
+    String,
+) {
+    let mut ptr = None;
+    let mut prop_val = None;
+    let mut current_name = String::new();
+
+    for prop in props.iter_mut() {
+        if prop.name == *name {
+            prop_val = Some(Rc::clone(&prop.value));
+
+            let temp_prop = &prop.value;
+            if let Value::Struct(new_name, _, _) = &mut *temp_prop.borrow_mut() {
+                current_name = new_name.clone();
+                ptr = Some(Rc::clone(temp_prop));
+            }
+
+            break;
+        }
+    }
+
+    (ptr, prop_val, current_name)
 }
 
 pub fn push_to_array<'a>(
@@ -770,7 +800,7 @@ pub fn push_to_array<'a>(
     structs: &mut StructInfo,
     scope: usize,
     arr: &mut Vec<Value>,
-    arr_type: &mut VarType,
+    arr_type: &VarType,
     args: &Vec<AstNode>,
     stdout: &mut Stdout,
 ) {
@@ -1339,8 +1369,8 @@ fn compare_struct_values(left: &Vec<StructProp>, right: &Vec<StructProp>) -> boo
 
         for right_val in right.iter() {
             if left_val.name == right_val.name {
-                let left = left_val.value.as_ref().borrow().clone();
-                let right = left_val.value.as_ref().borrow().clone();
+                let left = left_val.value.borrow().clone();
+                let right = left_val.value.borrow().clone();
                 if match comp_bind!(&left, &right, ==) {
                     Ok(val) => val,
                     Err(_) => false,
@@ -1373,7 +1403,7 @@ pub fn compare<'a>(
                 Token::Identifier(ident) => {
                     let var_ptr = get_var_ptr(vars, &ident);
                     let var_ref = var_ptr.borrow();
-                    let right_val = &var_ref.value;
+                    let right_val = &*var_ref.value.borrow();
                     comp_match!(comp_token, &left_val, right_val)
                 }
                 _ => {
@@ -1386,7 +1416,7 @@ pub fn compare<'a>(
             Token::Identifier(ident) => {
                 let var_ptr = get_var_ptr(vars, &ident);
                 let var_ref = var_ptr.borrow();
-                let left_val = &var_ref.value;
+                let left_val = &*var_ref.value.borrow();
                 match right {
                     EvalValue::Value(right_val) => {
                         comp_match!(comp_token, left_val, &right_val)
@@ -1395,7 +1425,7 @@ pub fn compare<'a>(
                         Token::Identifier(ident) => {
                             let var_ptr = get_var_ptr(vars, &ident);
                             let var_ref = var_ptr.borrow();
-                            let right_val = &var_ref.value;
+                            let right_val = &*var_ref.value.borrow();
                             comp_match!(comp_token, &left_val, right_val)
                         }
                         _ => {
@@ -1416,7 +1446,7 @@ pub fn compare<'a>(
                         Token::Identifier(ident) => {
                             let var_ptr = get_var_ptr(vars, &ident);
                             let var_ref = var_ptr.borrow();
-                            let right_val = &var_ref.value;
+                            let right_val = &*var_ref.value.borrow();
                             comp_match!(comp_token, &left_val, right_val)
                         }
                         _ => {
@@ -1443,7 +1473,7 @@ pub fn index_arr(
     arr: Rc<RefCell<VarValue>>,
     index: EvalValue,
 ) -> Value {
-    match &arr.borrow().value {
+    match &*arr.borrow().value.borrow() {
         Value::Array(arr, _) => {
             let index = get_eval_value(vars, index);
 
@@ -1471,7 +1501,7 @@ pub fn set_index_arr<'a>(
     if let Some(value) = eval_node(vars, functions, structs, scope, &value, stdout) {
         let index_val = get_eval_value(vars, index);
         match index_val {
-            Value::Usize(val) => match arr.borrow_mut().value {
+            Value::Usize(val) => match *arr.borrow_mut().value.borrow_mut() {
                 Value::Array(ref mut arr_val, _) => {
                     arr_val[val] = get_eval_value(vars, value);
                 }

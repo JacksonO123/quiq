@@ -30,7 +30,8 @@ pub fn init_builtins(
                     EvalValue::Token(tok) => match tok {
                         Token::Identifier(ident) => {
                             let var_ptr = get_var_ptr(vars, &ident);
-                            let var_value = &var_ptr.borrow().value;
+                            let var_borrow = var_ptr.borrow();
+                            let var_value = &*var_borrow.value.borrow();
                             var_value.get_str()
                         }
                         _ => value_from_token(tok, None).get_str(),

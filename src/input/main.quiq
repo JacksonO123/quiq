@@ -20,6 +20,7 @@ temp str = <temp>{
   }
 };
 
-str.more.value = 2 + 1;
+// str.name = "what";
+str.more.value = 2;
 
 print(str);
