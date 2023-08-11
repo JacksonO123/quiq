@@ -138,9 +138,6 @@ impl VarValue {
             scope,
         }
     }
-    pub fn get_str(&self) -> String {
-        format!("Var: {} -> ", self.name).to_owned() + self.value.borrow().get_str().as_str()
-    }
 }
 
 pub fn get_var_ptr<'a>(
@@ -653,6 +650,7 @@ pub fn eval_node<'a>(
                         AstNode::Token(t) => match t {
                             Token::Identifier(ident) => match ident.as_str() {
                                 "length" => Some(EvalValue::Value(Value::Usize(vals.len()))),
+                                // "first" => unimplemented!(),
                                 _ => unimplemented!(),
                             },
                             _ => panic!("Unexpected method: {:?}", t),

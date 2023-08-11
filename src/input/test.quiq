@@ -1,13 +1,4 @@
-struct Test {
-  arr: int[];
-}
-
-Test t = <Test>{
-  arr: <int>[]
-}
-
-for (i; 0; 10) {
-  // t.arr.push(i);
-}
-
-print(t.arr);
+int v = 2;
+ref<int> r = ref(v);
+r = 4;
+print(v);

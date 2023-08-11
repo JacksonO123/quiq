@@ -185,10 +185,7 @@ impl Ast {
     }
 }
 
-pub fn get_ast_node<'a>(
-    structs: &mut StructInfo,
-    tokens: &mut Vec<Option<Token>>,
-) -> Option<AstNode> {
+pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Option<AstNode> {
     if tokens.len() == 0 {
         None
     } else if tokens.len() == 1 {
@@ -270,6 +267,7 @@ pub fn get_ast_node<'a>(
             Token::Identifier(ident) => match tokens[1].as_ref().unwrap() {
                 Token::LParen => Some(create_func_call_node(structs, tokens)),
                 Token::EqSet => Some(create_set_var_node(structs, tokens)),
+                Token::LAngle => Some(create_make_var_node(structs, tokens, false)),
                 Token::Period => {
                     let struct_token = tokens[0].take().unwrap();
                     tokens.remove(0);

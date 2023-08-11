@@ -51,16 +51,46 @@ pub fn init_builtins(
         },
     )));
 
-    functions
-        .borrow_mut()
-        .push(Func::Builtin(BuiltinFunc::new("type", |_, params, _| {
+    functions.borrow_mut().push(Func::Builtin(BuiltinFunc::new(
+        "type",
+        |vars, params, _| {
             expect_params!("type", 1, params.len());
 
             let res = match params[0].to_owned() {
-                EvalValue::Token(t) => String::from(t.get_token_name()),
+                EvalValue::Token(t) => match t {
+                    Token::Identifier(ident) => {
+                        let ptr = get_var_ptr(vars, &ident);
+                        let ptr_borrow = ptr.borrow();
+                        let ptr_value = ptr_borrow.value.borrow();
+                        ptr_value.get_enum_str().clone()
+                    }
+                    _ => String::from(t.get_token_name()),
+                },
                 EvalValue::Value(v) => v.get_enum_str(),
             };
 
             Some(Value::String(res))
-        })))
+        },
+    )));
+
+    functions
+        .borrow_mut()
+        .push(Func::Builtin(BuiltinFunc::new("ref", |vars, params, _| {
+            expect_params!("ref", 1, params.len());
+
+            match &params[0] {
+                // cloning here because the value is defined within the ref function and cannot be
+                // referenced anywhere else, therefore it is not important to keep the reference
+                // with the original value
+                EvalValue::Value(val) => Some(Value::Ref(Rc::new(RefCell::new(val.clone())))),
+                EvalValue::Token(t) => match t {
+                    Token::Identifier(ident) => {
+                        let val = get_var_ptr(vars, &ident);
+                        let val_ref = val.borrow_mut();
+                        Some(Value::Ref(Rc::clone(&val_ref.value)))
+                    }
+                    _ => panic!("Expected identifier or value to create ref"),
+                },
+            }
+        })));
 }

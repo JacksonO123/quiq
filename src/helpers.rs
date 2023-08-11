@@ -78,7 +78,19 @@ pub fn create_make_var_node<'a>(
                 panic!("Expected identifier for variable name");
             }
         } else {
-            panic!("Expected identifier for variable name");
+            let name = match first_token {
+                Token::Identifier(ident) => Some(ident),
+                _ => None,
+            };
+            if let Some(n) = name {
+                if let Some(t) = is_generic_type(&n, tokens) {
+                    t
+                } else {
+                    panic!("Type {} is not generic", n);
+                }
+            } else {
+                panic!("Expected identifier for variable name");
+            }
         }
     };
 
@@ -225,8 +237,8 @@ pub fn create_keyword_node<'a>(
             let name_option = tokens[1].as_ref().unwrap().clone();
             let mut shape_tokens = tokens_to_delimiter(tokens, 2, "}");
 
-            let shape = if let Token::Identifier(ident) = name_option {
-                create_struct_shape(&mut shape_tokens, &ident, structs)
+            let shape = if let Token::Identifier(_) = name_option {
+                create_struct_shape(&mut shape_tokens, structs)
             } else {
                 panic!("Expected identifier for struct decleration name");
             };
@@ -243,7 +255,6 @@ pub fn create_keyword_node<'a>(
 
 fn create_struct_shape<'a>(
     shape: &mut Vec<Option<Token>>,
-    name: &String,
     structs: &mut StructInfo,
 ) -> StructShape {
     let mut struct_shape = StructShape::new();
@@ -387,17 +398,34 @@ pub fn set_var_value<'a>(
 ) {
     let res_option = vars.get(&name);
     if let Some(res) = res_option {
-        let mut value_ref = res.borrow_mut();
+        let value_ref = res.borrow_mut();
         let var_value = &value_ref.value;
         let var_value_type = type_from_value(&*(var_value.borrow()));
-        if ensure_type(&var_value_type, &value) {
-            *value_ref.value.borrow_mut() = value;
-        } else {
-            panic!(
-                "expected type: {:?} found {:?}",
-                var_value_type,
-                type_from_value(&value)
-            );
+        match var_value_type {
+            VarType::Ref(ref ref_type) => {
+                if ensure_type(&*ref_type, &value) {
+                    if let Value::Ref(ref mut inner_val) = &mut *value_ref.value.borrow_mut() {
+                        *inner_val.borrow_mut() = value;
+                    }
+                } else {
+                    panic!(
+                        "expected type: {:?} found {:?}",
+                        var_value_type,
+                        type_from_value(&value)
+                    );
+                }
+            }
+            _ => {
+                if ensure_type(&var_value_type, &value) {
+                    *value_ref.value.borrow_mut() = value;
+                } else {
+                    panic!(
+                        "expected type: {:?} found {:?}",
+                        var_value_type,
+                        type_from_value(&value)
+                    );
+                }
+            }
         }
     } else {
         panic!("Cannot set value of undefined variable: {}", name);
@@ -688,7 +716,7 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
         Value::Ref(ref_ptr) => match var_type {
             VarType::Ref(ref_type) => {
                 let ref_value = ref_ptr.as_ref().borrow();
-                ensure_type(ref_type, val)
+                ensure_type(ref_type, &*ref_value)
             }
             _ => false,
         },
@@ -747,7 +775,10 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
     }
 }
 
-pub fn get_eval_value(vars: &mut HashMap<String, Rc<RefCell<VarValue>>>, val: EvalValue) -> Value {
+pub fn get_eval_value<'a>(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    val: EvalValue,
+) -> Value {
     match val {
         EvalValue::Value(v) => v,
         EvalValue::Token(t) => match t {
@@ -1179,7 +1210,7 @@ pub fn create_comp_node<'a>(
             }
             Token::LAngleEq => true,
             Token::RAngleEq => true,
-            _ => false,
+            _ => return None,
         } && open_parens == 0
         {
             for j in 0..i {
@@ -1589,5 +1620,20 @@ pub fn set_struct_prop(
             prop.value = Rc::new(RefCell::new(value));
             break;
         }
+    }
+}
+
+fn is_generic_type(name: &String, tokens: &mut Vec<Option<Token>>) -> Option<VarType> {
+    match name.as_str() {
+        "ref" => {
+            let type_tokens = tokens_to_delimiter(tokens, 2, ">");
+            let generic_type = match type_tokens[0].as_ref().unwrap() {
+                Token::Type(t) => t.clone(),
+                _ => panic!("Expected valid for generic"),
+            };
+
+            Some(VarType::Ref(Box::new(generic_type)))
+        }
+        _ => None,
     }
 }

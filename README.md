@@ -10,9 +10,9 @@ This time written in rust
 - [x] For loop
 - [x] Structs
   - [x] Account for array property types
-- [ ] Add ref as a value type (basically a pointer) (not sure when this should be added (not v important rn))
-- [ ] While loops
+- [x] Add ref as a value type (pointer)
 - [ ] Functions
+- [ ] While loops
 - [ ] Manual memory utilities
 
 ## Features

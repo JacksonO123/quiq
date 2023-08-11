@@ -44,8 +44,6 @@ fn main() {
     let tree = generate_tree(&mut struct_info, &mut tokens);
     let tree_end = tree_start.elapsed();
 
-    // println!("{:#?}", tree);
-
     let mut vars: HashMap<String, Rc<RefCell<VarValue>>> = HashMap::new();
     let functions = Rc::new(RefCell::new(Vec::new()));
 
@@ -98,15 +96,7 @@ fn main() {
             end.as_nanos()
         );
     }
-
-    // print_vars(&vars);
 }
-
-// fn print_vars<'a>(vars: &'a Vec<Rc<RefCell<VarValue>>>) {
-//     for var in vars.iter() {
-//         println!("{}", var.borrow().get_str());
-//     }
-// }
 
 fn get_file(name: &str) -> String {
     let path_str = "src/input/".to_owned() + name;
