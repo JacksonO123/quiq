@@ -1,32 +1,32 @@
-struct inner {
+struct Inner {
   value: string;
   lifetime: int;
 }
 
-struct obj {
+struct Obj {
   value: int;
-  other: inner[];
+  other: Inner[];
 }
 
-struct temp {
+struct Temp {
   name: string;
   number: int;
   skills: long[];
-  more: obj;
+  more: Obj;
 }
 
-temp str = <temp>{
+Temp str = <Temp>{
   name: "hi",
   number: 123,
   skills: <long>[long(123), long(124)],
-  more: <obj>{
+  more: <Obj>{
     value: 10,
-    other: <inner>[
-      <inner>{
+    other: <Inner>[
+      <Inner>{
         value: "epic",
         lifetime: 10
       },
-      <inner>{
+      <Inner>{
         value: "cool",
         lifetime: 5
       }
@@ -36,8 +36,8 @@ temp str = <temp>{
 
 str.more.value = 2;
 
-ref<inner[]> arrRef = str.more.other;
-arrRef.push(<inner>{
+ref<Inner[]> arrRef = str.more.other;
+arrRef.push(<Inner>{
   value: "more!",
   lifetime: 1000
 });

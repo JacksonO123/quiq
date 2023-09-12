@@ -411,14 +411,20 @@ pub fn eval_node<'a>(
     match &node {
         AstNode::CreateStruct(name, shape, props) => {
             let mut struct_props: Vec<StructProp> = Vec::new();
+            let mut prop_keys: Vec<&String> = shape.props.keys().collect();
             for prop in props.iter() {
-                let (name, node) = prop;
+                let (prop_name, node) = prop;
+
+                if !shape.props.contains_key(prop_name.as_str()) {
+                    panic!("Unexpected property \"{}\" on struct {}", prop_name, name);
+                }
+
                 let val = eval_node(vars, Rc::clone(&functions), structs, scope, node, stdout);
 
                 if let Some(value) = val {
                     let value = get_eval_value(vars, value);
 
-                    let val_type_option = shape.props.get(name);
+                    let val_type_option = shape.props.get(prop_name);
                     if let Some(val_type) = val_type_option {
                         if !ensure_type(val_type, &value) {
                             panic!(
@@ -428,10 +434,27 @@ pub fn eval_node<'a>(
                         }
                     }
 
-                    struct_props.push(StructProp::new(name.clone(), value));
+                    let mut i = 0;
+                    while i < prop_keys.len() {
+                        if prop_keys[i] == prop_name {
+                            prop_keys.remove(i);
+                        }
+                        i += 1;
+                    }
+
+                    struct_props.push(StructProp::new(prop_name.clone(), value));
                 } else {
                     panic!("Expected value for struct property");
                 }
+            }
+
+            if prop_keys.len() > 0 {
+                let prop_keys: Vec<String> = prop_keys.iter().map(|&s| s.clone()).collect();
+                panic!(
+                    "Expected props {:?} on struct {}",
+                    prop_keys.join(", "),
+                    name
+                )
             }
 
             let res = Value::Struct(name.clone(), shape.clone(), struct_props);
