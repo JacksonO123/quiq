@@ -1,0 +1,4 @@
+int v = 2;
+ref<int> r = ref(v);
+r = 4;
+print(v);

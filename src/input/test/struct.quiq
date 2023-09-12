@@ -1,0 +1,46 @@
+struct inner {
+  value: string;
+  lifetime: int;
+}
+
+struct obj {
+  value: int;
+  other: inner[];
+}
+
+struct temp {
+  name: string;
+  number: int;
+  skills: long[];
+  more: obj;
+}
+
+temp str = <temp>{
+  name: "hi",
+  number: 123,
+  skills: <long>[long(123), long(124)],
+  more: <obj>{
+    value: 10,
+    other: <inner>[
+      <inner>{
+        value: "epic",
+        lifetime: 10
+      },
+      <inner>{
+        value: "cool",
+        lifetime: 5
+      }
+    ]
+  }
+};
+
+str.more.value = 2;
+
+ref<inner[]> arrRef = str.more.other;
+arrRef.push(<inner>{
+  value: "more!",
+  lifetime: 1000
+});
+
+print(arrRef.length);
+print(str);

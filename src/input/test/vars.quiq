@@ -1,0 +1,17 @@
+int a = 2;
+float b = 2;
+double c = 2;
+long d = 2;
+usize e = 2;
+string str = "epic str";
+bool f = false;
+
+struct Test {
+  vals: int[];
+}
+
+Test t = <Test>{
+  vals: <int>[1, 2, 3, 4],
+};
+
+print(t);

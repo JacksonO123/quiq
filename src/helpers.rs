@@ -83,7 +83,7 @@ pub fn create_make_var_node<'a>(
                 _ => None,
             };
             if let Some(n) = name {
-                if let Some(t) = is_generic_type(&n, tokens) {
+                if let Some(t) = is_generic_type(&n, structs, tokens) {
                     t
                 } else {
                     panic!("Type {} is not generic", n);
@@ -1501,6 +1501,32 @@ pub fn compare<'a>(
 
 pub fn index_arr(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    arr: &Rc<RefCell<Value>>,
+    index: EvalValue,
+) -> Value {
+    match &*arr.borrow() {
+        Value::Array(arr, _) => {
+            let index = get_eval_value(vars, index);
+
+            match index {
+                Value::Usize(val) => {
+                    if let Value::Ref(r) = &arr[val] {
+                        Value::Ref(Rc::clone(&r))
+                    } else {
+                        arr[val].clone()
+                    }
+                }
+                _ => {
+                    panic!("Array can only be indexed by usize");
+                }
+            }
+        }
+        _ => panic!("Cannot index a non-array type"),
+    }
+}
+
+pub fn index_arr_var_value(
+    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     arr: Rc<RefCell<VarValue>>,
     index: EvalValue,
 ) -> Value {
@@ -1623,17 +1649,49 @@ pub fn set_struct_prop(
     }
 }
 
-fn is_generic_type(name: &String, tokens: &mut Vec<Option<Token>>) -> Option<VarType> {
+fn is_generic_type(
+    name: &String,
+    structs: &mut StructInfo,
+    tokens: &mut Vec<Option<Token>>,
+) -> Option<VarType> {
     match name.as_str() {
         "ref" => {
             let type_tokens = tokens_to_delimiter(tokens, 2, ">");
-            let generic_type = match type_tokens[0].as_ref().unwrap() {
+            let mut generic_type = match type_tokens[0].as_ref().unwrap() {
                 Token::Type(t) => t.clone(),
-                _ => panic!("Expected valid for generic"),
+                Token::Identifier(ident) => {
+                    let struct_info = structs.available_structs.get(ident.as_str());
+                    if let Some(struct_shape) = struct_info {
+                        VarType::Struct(ident.clone(), struct_shape.clone())
+                    } else {
+                        panic!("Unexpected type {}", ident);
+                    }
+                }
+                _ => panic!("Expected valid type for generic"),
             };
+
+            let mut i = 0;
+            while i < type_tokens.len() - 1
+                && match type_tokens[i + 1].as_ref().unwrap() {
+                    Token::LBracket => true,
+                    _ => false,
+                }
+            {
+                generic_type = VarType::Array(Box::new(generic_type));
+
+                i += 2;
+            }
 
             Some(VarType::Ref(Box::new(generic_type)))
         }
         _ => None,
+    }
+}
+
+pub fn get_ref_value(val: &Rc<RefCell<Value>>) -> Rc<RefCell<Value>> {
+    if let Value::Ref(ref r) = *val.borrow() {
+        get_ref_value(&Rc::clone(r))
+    } else {
+        Rc::clone(val)
     }
 }

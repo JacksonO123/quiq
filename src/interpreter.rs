@@ -3,8 +3,9 @@ use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 use crate::{
     ast::{Ast, AstNode, StructShape, Value},
     helpers::{
-        cast, compare, ensure_type, flatten_exp, get_eval_value, get_prop_ptr, index_arr, make_var,
-        push_to_array, set_index_arr, set_struct_prop, set_var_value, ExpValue,
+        cast, compare, ensure_type, flatten_exp, get_eval_value, get_prop_ptr, get_ref_value,
+        index_arr, index_arr_var_value, make_var, push_to_array, set_index_arr, set_struct_prop,
+        set_var_value, ExpValue,
     },
     tokenizer::{OperatorType, Token},
 };
@@ -478,7 +479,7 @@ pub fn eval_node<'a>(
             ) {
                 if let Token::Identifier(ident) = arr_tok {
                     let var_ptr = get_var_ptr(vars, &ident);
-                    let res = index_arr(vars, var_ptr, index);
+                    let res = index_arr_var_value(vars, var_ptr, index);
 
                     Some(EvalValue::Value(res))
                 } else {
@@ -623,7 +624,8 @@ pub fn eval_node<'a>(
             };
 
             let var_value = &*var_ptr.borrow_mut();
-            let value = &var_value.value;
+            let temp_val = &var_value.value;
+            let value = get_ref_value(temp_val);
 
             let res = match &mut *value.borrow_mut() {
                 Value::Array(ref mut vals, arr_type) => {
@@ -650,7 +652,6 @@ pub fn eval_node<'a>(
                         AstNode::Token(t) => match t {
                             Token::Identifier(ident) => match ident.as_str() {
                                 "length" => Some(EvalValue::Value(Value::Usize(vals.len()))),
-                                // "first" => unimplemented!(),
                                 _ => unimplemented!(),
                             },
                             _ => panic!("Unexpected method: {:?}", t),
@@ -726,6 +727,40 @@ pub fn eval_node<'a>(
                                 } else {
                                     panic!("Expected value to set to struct property");
                                 }
+                            }
+                            AstNode::IndexArr(tok, node) => {
+                                let mut new_current_struct = Rc::clone(&current_struct);
+                                if let Value::Struct(_, _, ref mut props) =
+                                    &mut *current_struct.borrow_mut()
+                                {
+                                    if let Token::Identifier(ident) = tok {
+                                        for prop in props.iter_mut() {
+                                            if prop.name == *ident {
+                                                let index = eval_node(
+                                                    vars,
+                                                    Rc::clone(&functions),
+                                                    structs,
+                                                    scope,
+                                                    node,
+                                                    stdout,
+                                                );
+                                                let res =
+                                                    index_arr(vars, &prop.value, index.unwrap());
+                                                if let Value::Struct(_, _, _) = res {
+                                                    new_current_struct = Rc::new(RefCell::new(res));
+                                                } else if let Value::Ref(v) = res {
+                                                    if let Value::Struct(_, _, _) = *v.borrow() {
+                                                        new_current_struct = Rc::clone(&v);
+                                                    }
+                                                } else {
+                                                    return Some(EvalValue::Value(res));
+                                                }
+                                                break;
+                                            }
+                                        }
+                                    }
+                                }
+                                prop_val = Some(new_current_struct);
                             }
                             _ => {
                                 panic!("Unexpected operation: {:?}", access_path)
@@ -833,10 +868,21 @@ pub fn eval_node<'a>(
             None
         }
         AstNode::MakeVar(var_type, name, value) => {
-            make_var(
-                vars, functions, structs, scope, var_type, name, value, stdout,
-            );
-            None
+            if let Token::Identifier(ident) = name {
+                if vars.get(ident.as_str()).is_none() {
+                    make_var(
+                        vars, functions, structs, scope, var_type, name, value, stdout,
+                    );
+                    None
+                } else {
+                    panic!(
+                        "Variable \"{}\" already exists, cannot be re-defined",
+                        ident
+                    );
+                }
+            } else {
+                panic!("Expected variable name to be identifier");
+            }
         }
         AstNode::SetVar(name, value) => {
             let value = eval_node(vars, functions, structs, scope, value.as_ref(), stdout);

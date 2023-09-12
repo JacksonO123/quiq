@@ -284,7 +284,8 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
                 }
                 Token::LBracket => {
                     if structs.available_structs.contains_key(ident) {
-                        unimplemented!()
+                        // get_type_expression(tokens, structs)
+                        Some(create_make_var_node(structs, tokens, true))
                     } else {
                         let mut index_tokens = tokens_to_delimiter(tokens, 2, "]");
                         let arr_index_end = 3 + index_tokens.len();
