@@ -2,6 +2,7 @@ use std::{cell::RefCell, collections::HashMap, io::Write, rc::Rc};
 
 use crate::{
     ast::Value,
+    helpers::{get_eval_value, get_ref_value},
     interpreter::{get_var_ptr, value_from_token, BuiltinFunc, EvalValue, Func, VarValue},
     tokenizer::Token,
 };
@@ -93,4 +94,16 @@ pub fn init_builtins(
                 },
             }
         })));
+
+    functions.borrow_mut().push(Func::Builtin(BuiltinFunc::new(
+        "clone",
+        |vars, params, _| {
+            let eval_value = params[0].clone();
+            let to_clone = get_eval_value(vars, eval_value, false);
+            Some(match to_clone {
+                Value::Ref(r) => get_ref_value(&r).borrow().clone(),
+                _ => to_clone,
+            })
+        },
+    )))
 }

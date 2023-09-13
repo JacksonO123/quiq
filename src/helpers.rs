@@ -95,6 +95,19 @@ pub fn create_make_var_node<'a>(
     };
 
     let mut i = 0;
+    if let Token::LAngle = tokens[1].as_ref().unwrap() {
+        i += 2;
+        while match tokens[i].as_ref() {
+            Some(v) => match v {
+                Token::RAngle => false,
+                _ => true,
+            },
+            None => true,
+        } {
+            i += 1;
+        }
+    }
+
     while match tokens[i + 1].as_ref().unwrap() {
         Token::LBracket => true,
         _ => false,
@@ -448,6 +461,7 @@ pub fn tokens_to_delimiter<'a>(
                 Token::LParen => true,
                 Token::LBrace => true,
                 Token::LBracket => true,
+                Token::LAngle => true,
                 _ => false,
             } {
                 open_brackets += 1;
@@ -455,6 +469,7 @@ pub fn tokens_to_delimiter<'a>(
                 Token::RParen => true,
                 Token::RBrace => true,
                 Token::RBracket => true,
+                Token::RAngle => true,
                 _ => false,
             } {
                 open_brackets -= 1;
@@ -654,7 +669,10 @@ pub fn get_type_expression(tokens: &mut Vec<Option<Token>>, structs: &mut Struct
         if let Token::Identifier(ident) = first_token {
             match structs.available_structs.get(&ident) {
                 Some(v) => VarType::Struct(ident.clone(), v.clone()),
-                None => panic!("Expected type or struct name for type expression"),
+                None => {
+                    let generic_type = is_generic_type(&ident, structs, tokens);
+                    generic_type.expect("Expected type or struct name for type expression")
+                }
             }
         } else {
             panic!("Expected type or struct name for type expression");
@@ -715,7 +733,7 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
     match val {
         Value::Ref(ref_ptr) => match var_type {
             VarType::Ref(ref_type) => {
-                let ref_value = ref_ptr.as_ref().borrow();
+                let ref_value = ref_ptr.borrow();
                 ensure_type(ref_type, &*ref_value)
             }
             _ => false,
@@ -778,6 +796,7 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
 pub fn get_eval_value<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     val: EvalValue,
+    clone: bool,
 ) -> Value {
     match val {
         EvalValue::Value(v) => v,
@@ -788,41 +807,39 @@ pub fn get_eval_value<'a>(
             Token::Identifier(ident) => {
                 let var_ptr = get_var_ptr(vars, &ident);
                 let var_ref = var_ptr.borrow();
-                let val = var_ref.value.borrow();
-                val.clone()
+                if clone {
+                    let ref_value = &var_ref.value;
+                    if let Value::Ref(r) = &*ref_value.borrow() {
+                        Value::Ref(Rc::clone(&r))
+                    } else {
+                        var_ref.value.borrow().clone()
+                    }
+                } else {
+                    let ref_value = &var_ref.value;
+                    if let Value::Ref(r) = &*ref_value.borrow() {
+                        Value::Ref(Rc::clone(&r))
+                    } else {
+                        let val = Rc::clone(ref_value);
+                        Value::Ref(val)
+                    }
+                }
             }
             _ => panic!("Unexpected token: {:?}", t),
         },
     }
 }
 
-pub fn get_prop_ptr(
-    props: &mut Vec<StructProp>,
-    name: &String,
-) -> (
-    Option<Rc<RefCell<Value>>>,
-    Option<Rc<RefCell<Value>>>,
-    String,
-) {
+pub fn get_prop_ptr(props: &mut Vec<StructProp>, name: &String) -> Option<Rc<RefCell<Value>>> {
     let mut ptr = None;
-    let mut prop_val = None;
-    let mut current_name = String::new();
 
     for prop in props.iter_mut() {
         if prop.name == *name {
-            prop_val = Some(Rc::clone(&prop.value));
-
-            let temp_prop = &prop.value;
-            if let Value::Struct(new_name, _, _) = &mut *temp_prop.borrow_mut() {
-                current_name = new_name.clone();
-                ptr = Some(Rc::clone(temp_prop));
-            }
-
+            ptr = Some(Rc::clone(&prop.value));
             break;
         }
     }
 
-    (ptr, prop_val, current_name)
+    ptr
 }
 
 pub fn push_to_array<'a>(
@@ -839,12 +856,12 @@ pub fn push_to_array<'a>(
         let arg_res_option = eval_node(vars, Rc::clone(&functions), structs, scope, arg, stdout);
 
         if let Some(arg_res) = arg_res_option {
-            let val = get_eval_value(vars, arg_res);
+            let val = get_eval_value(vars, arg_res, true);
             if !ensure_type(&arr_type, &val) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
-                    type_from_value(&val),
                     arr_type,
+                    type_from_value(&val),
                 );
             }
             arr.push(val);
@@ -1499,32 +1516,6 @@ pub fn compare<'a>(
     }
 }
 
-pub fn index_arr(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    arr: &Rc<RefCell<Value>>,
-    index: EvalValue,
-) -> Value {
-    match &*arr.borrow() {
-        Value::Array(arr, _) => {
-            let index = get_eval_value(vars, index);
-
-            match index {
-                Value::Usize(val) => {
-                    if let Value::Ref(r) = &arr[val] {
-                        Value::Ref(Rc::clone(&r))
-                    } else {
-                        arr[val].clone()
-                    }
-                }
-                _ => {
-                    panic!("Array can only be indexed by usize");
-                }
-            }
-        }
-        _ => panic!("Cannot index a non-array type"),
-    }
-}
-
 pub fn index_arr_var_value(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     arr: Rc<RefCell<VarValue>>,
@@ -1532,13 +1523,12 @@ pub fn index_arr_var_value(
 ) -> Value {
     match &*arr.borrow().value.borrow() {
         Value::Array(arr, _) => {
-            let index = get_eval_value(vars, index);
+            let index = get_eval_value(vars, index, true);
 
-            match index {
-                Value::Usize(val) => arr[val].clone(),
-                _ => {
-                    panic!("Array can only be indexed by usize");
-                }
+            if let Value::Usize(val) = index {
+                arr[val].clone()
+            } else {
+                panic!("Array can only be indexed by usize")
             }
         }
         _ => panic!("Cannot index a non-array type"),
@@ -1556,11 +1546,11 @@ pub fn set_index_arr<'a>(
     value: AstNode,
 ) {
     if let Some(value) = eval_node(vars, functions, structs, scope, &value, stdout) {
-        let index_val = get_eval_value(vars, index);
+        let index_val = get_eval_value(vars, index, false);
         match index_val {
             Value::Usize(val) => match *arr.borrow_mut().value.borrow_mut() {
                 Value::Array(ref mut arr_val, _) => {
-                    arr_val[val] = get_eval_value(vars, value);
+                    arr_val[val] = get_eval_value(vars, value, false);
                 }
                 _ => panic!("Only arrays can be indexed"),
             },
@@ -1627,26 +1617,6 @@ pub fn create_struct_node(
     }
 
     AstNode::CreateStruct(name.clone(), shape, props)
-}
-
-pub fn set_struct_prop(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    props: &mut Vec<StructProp>,
-    token: &Token,
-    value: EvalValue,
-) {
-    let name = match token {
-        Token::Identifier(ident) => ident,
-        _ => panic!("Expected identifier to access struct with"),
-    };
-
-    for prop in props.iter_mut() {
-        if prop.name == *name {
-            let value = get_eval_value(vars, value);
-            prop.value = Rc::new(RefCell::new(value));
-            break;
-        }
-    }
 }
 
 fn is_generic_type(
