@@ -25,6 +25,8 @@ pub enum Keyword {
     For,
     While,
     Struct,
+    Func,
+    Return,
 }
 impl Keyword {
     pub fn get_str(&self) -> &str {
@@ -34,6 +36,8 @@ impl Keyword {
             Keyword::While => "while",
             Keyword::For => "for",
             Keyword::Struct => "struct",
+            Keyword::Func => "func",
+            Keyword::Return => "return",
         }
     }
 }
@@ -198,12 +202,15 @@ pub fn tokenize(code: &str) -> Vec<Option<Token>> {
                 "bool" => Token::Type(VarType::Bool),
                 "string" => Token::Type(VarType::String),
                 "usize" => Token::Type(VarType::Usize),
+                "void" => Token::Type(VarType::Void),
                 // keywords (add more)
                 "if" => Token::Keyword(Keyword::If),
                 "else" => Token::Keyword(Keyword::Else),
                 "for" => Token::Keyword(Keyword::For),
                 "while" => Token::Keyword(Keyword::While),
                 "struct" => Token::Keyword(Keyword::Struct),
+                "func" => Token::Keyword(Keyword::Func),
+                "return" => Token::Keyword(Keyword::Return),
                 // booleans
                 "true" => Token::Bool(true),
                 "false" => Token::Bool(false),

@@ -7,7 +7,7 @@ use crate::{
         get_exp_node, get_struct_access_tokens, get_type_expression, is_exp, is_sequence,
         tokens_to_delimiter,
     },
-    interpreter::{StructInfo, StructProp, VarType},
+    interpreter::{CustomFunc, EvalValue, StructInfo, StructProp, VarType},
     tokenizer::Token,
 };
 
@@ -137,10 +137,22 @@ impl Value {
 }
 
 #[derive(Clone, Debug)]
+pub struct FuncParam {
+    pub param_type: VarType,
+    pub name: String,
+}
+impl FuncParam {
+    pub fn new(name: String, param_type: VarType) -> Self {
+        Self { param_type, name }
+    }
+}
+
+#[derive(Clone, Debug)]
 pub enum AstNode {
     StatementSeq(Vec<Rc<RefCell<AstNode>>>),
     /// type, name, value node
     MakeVar(VarType, Token, Option<Box<AstNode>>),
+    MakeFunc(Rc<RefCell<CustomFunc>>),
     SetVar(Token, Box<AstNode>),
     Token(Token),
     CallFunc(String, Vec<AstNode>),
@@ -166,6 +178,7 @@ pub enum AstNode {
     SetArrIndex(Token, Box<AstNode>, Box<AstNode>),
     /// struct type name, shape, props
     CreateStruct(String, StructShape, Vec<(String, AstNode)>),
+    Return(Box<AstNode>),
 }
 
 impl AstNode {
@@ -405,12 +418,9 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
 
     let mut i = 0;
     while i < tokens.len() {
-        match tokens[i].as_ref().unwrap() {
-            Token::NewLine => {
-                i += 1;
-                continue;
-            }
-            _ => {}
+        if let Token::NewLine = tokens[i].as_ref().unwrap() {
+            i += 1;
+            continue;
         }
 
         let mut token_slice = get_sequence_slice(tokens, i);

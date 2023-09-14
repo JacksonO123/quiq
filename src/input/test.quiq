@@ -1,3 +1,9 @@
-for (i;0;1000000) {
-  print(i);
+func test(int a) int {
+  print("testing", a);
+  if (true) {
+    return 10;
+  }
 }
+
+int b = test(5);
+print(b);

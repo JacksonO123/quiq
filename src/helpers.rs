@@ -1,10 +1,10 @@
 use std::{cell::RefCell, collections::HashMap, io::Stdout, process::exit, rc::Rc};
 
 use crate::{
-    ast::{get_ast_node, get_value_arr_str, AstNode, StructShape, Value},
+    ast::{get_ast_node, get_value_arr_str, AstNode, FuncParam, StructShape, Value},
     interpreter::{
-        eval_node, get_var_ptr, value_from_token, EvalValue, Func, StructInfo, StructProp, VarType,
-        VarValue,
+        eval_node, get_var_ptr, value_from_token, CustomFunc, EvalValue, Func, QuitType,
+        StructInfo, StructProp, VarType, VarValue,
     },
     tokenizer::{Keyword, Token},
 };
@@ -22,10 +22,10 @@ pub fn make_var<'a>(
     let value = if let Some(val) = value {
         eval_node(vars, functions, structs, scope, val.as_ref(), stdout)
     } else {
-        Some(EvalValue::Value(Value::Null))
+        (Some(EvalValue::Value(Value::Null)), None)
     };
 
-    if let Some(tok) = value {
+    if let (Some(tok), _) = value {
         let val = match tok {
             EvalValue::Token(t) => value_from_token(&t, Some(var_type)),
             EvalValue::Value(v) => match v {
@@ -263,6 +263,39 @@ pub fn create_keyword_node<'a>(
                 panic!("Expected identifier for struct name");
             }
         }
+        Keyword::Func => {
+            // [func, name, (, ...params..., ), return_type, {]
+            let name_option = tokens[1].take().unwrap();
+            let mut param_tokens = tokens_to_delimiter(tokens, 3, ")");
+            let mut return_type_tokens = tokens_to_delimiter(tokens, 4 + param_tokens.len(), "{");
+
+            if return_type_tokens.len() == 0 {
+                panic!("Expected return type for function");
+            }
+
+            let return_type = get_type_expression(&mut return_type_tokens, structs);
+            let mut block_tokens = tokens_to_delimiter(
+                tokens,
+                6 + param_tokens.len() + return_type_tokens.len(),
+                "}",
+            );
+            let block_node = get_ast_node(structs, &mut block_tokens)
+                .unwrap_or_else(|| AstNode::StatementSeq(vec![]));
+
+            let params = get_param_definitions(structs, &mut param_tokens);
+
+            if let Token::Identifier(name) = name_option {
+                let func = CustomFunc::new(name, params, return_type, block_node);
+                Some(AstNode::MakeFunc(Rc::new(RefCell::new(func))))
+            } else {
+                panic!("Expected identifier for func name")
+            }
+        }
+        Keyword::Return => {
+            let mut val_tokens = tokens_to_delimiter(tokens, 1, ";");
+            let node = get_ast_node(structs, &mut val_tokens).unwrap();
+            Some(AstNode::Return(Box::new(node)))
+        }
     }
 }
 
@@ -325,6 +358,29 @@ fn create_struct_shape<'a>(
     }
 
     struct_shape
+}
+
+pub fn get_param_definitions(
+    structs: &mut StructInfo,
+    tokens: &mut Vec<Option<Token>>,
+) -> Vec<FuncParam> {
+    let mut res = vec![];
+
+    let mut i = 0;
+    while i < tokens.len() {
+        let mut param_definition = tokens_to_delimiter(tokens, i, ",");
+        i += param_definition.len() + 1;
+        let name_option = param_definition.remove(param_definition.len() - 1);
+        let param_type = get_type_expression(&mut param_definition, structs);
+        if let Token::Identifier(name) = name_option.unwrap() {
+            let param = FuncParam::new(name, param_type);
+            res.push(param);
+        } else {
+            panic!("Expected identifier for parameter name");
+        }
+    }
+
+    res
 }
 
 fn get_params<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Vec<AstNode> {
@@ -627,7 +683,7 @@ pub fn flatten_exp<'a>(
             exp_node.as_ref(),
             stdout,
         );
-        if let Some(tok) = tok_option {
+        if let (Some(tok), _) = tok_option {
             let val = match tok {
                 EvalValue::Token(tok) => match tok {
                     Token::Operator(_) => ExpValue::Operator(tok),
@@ -855,7 +911,7 @@ pub fn push_to_array<'a>(
     for arg in args.iter() {
         let arg_res_option = eval_node(vars, Rc::clone(&functions), structs, scope, arg, stdout);
 
-        if let Some(arg_res) = arg_res_option {
+        if let (Some(arg_res), _) = arg_res_option {
             let val = get_eval_value(vars, arg_res, true);
             if !ensure_type(&arr_type, &val) {
                 panic!(
@@ -934,6 +990,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Struct(_, _) => cast_panic!("usize", "struct"),
             VarType::Null => cast_panic!("usize", "null"),
             VarType::Ref(_) => cast_panic!("usize", "ref"),
+            VarType::Void => cast_panic!("usize", "void"),
         },
         Value::String(v) => match to_type {
             VarType::Usize => {
@@ -953,6 +1010,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Struct(_, _) => cast_panic!("string", "struct"),
             VarType::Null => cast_panic!("string", "null"),
             VarType::Ref(_) => cast_panic!("string", "ref"),
+            VarType::Void => cast_panic!("string", "void"),
         },
         Value::Int(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -974,6 +1032,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Struct(_, _) => cast_panic!("int", "struct"),
             VarType::Null => cast_panic!("int", "null"),
             VarType::Ref(_) => cast_panic!("int", "ref"),
+            VarType::Void => cast_panic!("int", "void"),
         },
         Value::Float(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -995,6 +1054,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Struct(_, _) => cast_panic!("float", "struct"),
             VarType::Null => cast_panic!("float", "null"),
             VarType::Ref(_) => cast_panic!("float", "ref"),
+            VarType::Void => cast_panic!("float", "void"),
         },
         Value::Double(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1016,6 +1076,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Struct(_, _) => cast_panic!("double", "struct"),
             VarType::Null => cast_panic!("double", "null"),
             VarType::Ref(_) => cast_panic!("double", "ref"),
+            VarType::Void => cast_panic!("double", "void"),
         },
         Value::Long(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1037,6 +1098,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Struct(_, _) => cast_panic!("long", "struct"),
             VarType::Null => cast_panic!("long", "null"),
             VarType::Ref(_) => cast_panic!("long", "ref"),
+            VarType::Void => cast_panic!("long", "void"),
         },
         Value::Bool(v) => {
             let num_val = if v { 1 } else { 0 };
@@ -1052,6 +1114,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 VarType::Struct(_, _) => cast_panic!("bool", "struct"),
                 VarType::Null => cast_panic!("bool", "null"),
                 VarType::Ref(_) => cast_panic!("bool", "ref"),
+                VarType::Void => cast_panic!("bool", "void"),
             }
         }
         Value::Array(arr, _) => match to_type {
@@ -1066,6 +1129,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Struct(_, _) => cast_panic!("array", "struct"),
             VarType::Null => cast_panic!("array", "null"),
             VarType::Ref(_) => cast_panic!("array", "ref"),
+            VarType::Void => cast_panic!("array", "void"),
         },
         Value::Struct(_, _, _) => panic!("Cannot cast structs"),
     }
@@ -1545,7 +1609,7 @@ pub fn set_index_arr<'a>(
     index: EvalValue,
     value: AstNode,
 ) {
-    if let Some(value) = eval_node(vars, functions, structs, scope, &value, stdout) {
+    if let (Some(value), _) = eval_node(vars, functions, structs, scope, &value, stdout) {
         let index_val = get_eval_value(vars, index, false);
         match index_val {
             Value::Usize(val) => match *arr.borrow_mut().value.borrow_mut() {
@@ -1561,7 +1625,7 @@ pub fn set_index_arr<'a>(
     }
 }
 
-pub fn create_struct_node(
+pub fn create_struct_node<'a>(
     tokens: &mut Vec<Option<Token>>,
     structs: &mut StructInfo,
     shape: StructShape,
