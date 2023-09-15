@@ -99,7 +99,7 @@ pub fn init_builtins(
         "clone",
         |vars, params, _| {
             let eval_value = params[0].clone();
-            let to_clone = get_eval_value(vars, eval_value, false);
+            let to_clone = get_eval_value(vars, eval_value, true);
             Some(match to_clone {
                 Value::Ref(r) => get_ref_value(&r).borrow().clone(),
                 _ => to_clone,

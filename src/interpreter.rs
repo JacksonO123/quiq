@@ -106,7 +106,7 @@ impl CustomFunc {
         match quit {
             Some(q) => match q {
                 QuitType::Return(eval_val) => {
-                    let val = get_eval_value(vars, eval_val, false);
+                    let val = get_eval_value(vars, eval_val, true);
 
                     if ensure_type(&self.return_type, &val) {
                         return Some(val);
@@ -514,7 +514,7 @@ pub fn eval_node<'a>(
                 let (val, _) = eval_node(vars, Rc::clone(&functions), structs, scope, node, stdout);
 
                 if let Some(value) = val {
-                    let value = get_eval_value(vars, value, false);
+                    let value = get_eval_value(vars, value, true);
 
                     let val_type_option = shape.props.get(prop_name);
                     if let Some(val_type) = val_type_option {
@@ -614,7 +614,7 @@ pub fn eval_node<'a>(
                     from.as_ref(),
                     stdout,
                 ) {
-                    (Some(ev), _) => get_eval_value(vars, ev, true),
+                    (Some(ev), _) => get_eval_value(vars, ev, false),
                     (None, _) => panic!("Expected from value in for loop"),
                 };
                 let to_val = match eval_node(
@@ -625,7 +625,7 @@ pub fn eval_node<'a>(
                     to.as_ref(),
                     stdout,
                 ) {
-                    (Some(ev), _) => get_eval_value(vars, ev, true),
+                    (Some(ev), _) => get_eval_value(vars, ev, false),
                     (None, _) => panic!("Expected to value in for loop"),
                 };
                 let inc_val = if let Some(inc_value_node) = inc {
@@ -637,7 +637,7 @@ pub fn eval_node<'a>(
                         inc_value_node.as_ref(),
                         stdout,
                     ) {
-                        (Some(ev), _) => Some(get_eval_value(vars, ev, true)),
+                        (Some(ev), _) => Some(get_eval_value(vars, ev, false)),
                         (None, _) => panic!("Expected to value in for loop"),
                     }
                 } else {
@@ -726,7 +726,7 @@ pub fn eval_node<'a>(
             );
 
             if let (Some(eval_value), _) = res_option {
-                let val = get_eval_value(vars, eval_value, false);
+                let val = get_eval_value(vars, eval_value, true);
                 let casted_value = cast(var_type, val);
                 (Some(EvalValue::Value(casted_value)), None)
             } else {
@@ -803,7 +803,7 @@ pub fn eval_node<'a>(
                                     let eval_val = get_eval_value(
                                         vars,
                                         res_val.expect("Expected value to set to struct property"),
-                                        false,
+                                        true,
                                     );
 
                                     let ptr = if let Token::Identifier(ident) = tok {
@@ -837,7 +837,7 @@ pub fn eval_node<'a>(
                                         vars,
                                         eval_value
                                             .expect("Expected value to index struct property by"),
-                                        false,
+                                        true,
                                     );
 
                                     let index_value = if let Value::Ref(r) = eval_value {
@@ -900,7 +900,7 @@ pub fn eval_node<'a>(
                     eval_node(vars, Rc::clone(&functions), structs, scope, node, stdout);
 
                 if let (Some(res), _) = res_option {
-                    let val = get_eval_value(vars, res, false);
+                    let val = get_eval_value(vars, res, true);
 
                     if !ensure_type(arr_type, &val) {
                         panic!("Wrong type in array, expected {:?}", arr_type);

@@ -3,8 +3,8 @@ use std::{cell::RefCell, collections::HashMap, io::Stdout, process::exit, rc::Rc
 use crate::{
     ast::{get_ast_node, get_value_arr_str, AstNode, FuncParam, StructShape, Value},
     interpreter::{
-        eval_node, get_var_ptr, value_from_token, CustomFunc, EvalValue, Func, QuitType,
-        StructInfo, StructProp, VarType, VarValue,
+        eval_node, get_var_ptr, value_from_token, CustomFunc, EvalValue, Func, StructInfo,
+        StructProp, VarType, VarValue,
     },
     tokenizer::{Keyword, Token},
 };
@@ -507,9 +507,11 @@ pub fn tokens_to_delimiter<'a>(
     delimiter: &'a str,
 ) -> Vec<Option<Token>> {
     let mut res = vec![];
+    let mut has_unclosed_langle = false;
 
     let mut open_brackets = 0;
-    for i in start..tokens.len() {
+    let mut i = start;
+    while i < tokens.len() {
         if tokens[i].as_ref().unwrap().get_str() == delimiter && open_brackets == 0 {
             return res;
         } else {
@@ -517,7 +519,10 @@ pub fn tokens_to_delimiter<'a>(
                 Token::LParen => true,
                 Token::LBrace => true,
                 Token::LBracket => true,
-                Token::LAngle => true,
+                Token::LAngle => {
+                    has_unclosed_langle = true;
+                    true
+                }
                 _ => false,
             } {
                 open_brackets += 1;
@@ -525,14 +530,23 @@ pub fn tokens_to_delimiter<'a>(
                 Token::RParen => true,
                 Token::RBrace => true,
                 Token::RBracket => true,
-                Token::RAngle => true,
+                Token::RAngle => {
+                    has_unclosed_langle = false;
+                    true
+                }
                 _ => false,
             } {
                 open_brackets -= 1;
+                if has_unclosed_langle {
+                    has_unclosed_langle = false;
+                    continue;
+                }
             }
 
             res.push(Some(tokens[i].take().unwrap()));
         }
+
+        i += 1;
     }
 
     res
@@ -690,9 +704,13 @@ pub fn flatten_exp<'a>(
                     Token::Identifier(ident) => {
                         let var_ptr = get_var_ptr(vars, &ident);
                         let var_ref = var_ptr.borrow();
-                        let var_value = Rc::clone(&var_ref.value);
+                        let var_value_borrow = var_ref.value.borrow();
 
-                        ExpValue::Value(Value::Ref(var_value))
+                        if let Value::Ref(r) = &*var_value_borrow {
+                            ExpValue::Value(Value::Ref(Rc::clone(r)))
+                        } else {
+                            ExpValue::Value(var_value_borrow.clone())
+                        }
                     }
                     _ => ExpValue::Value(value_from_token(&tok, None)),
                 },
@@ -852,7 +870,7 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
 pub fn get_eval_value<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     val: EvalValue,
-    clone: bool,
+    return_ptr: bool,
 ) -> Value {
     match val {
         EvalValue::Value(v) => v,
@@ -863,20 +881,21 @@ pub fn get_eval_value<'a>(
             Token::Identifier(ident) => {
                 let var_ptr = get_var_ptr(vars, &ident);
                 let var_ref = var_ptr.borrow();
-                if clone {
-                    let ref_value = &var_ref.value;
-                    if let Value::Ref(r) = &*ref_value.borrow() {
-                        Value::Ref(Rc::clone(&r))
-                    } else {
-                        var_ref.value.borrow().clone()
-                    }
-                } else {
+
+                if return_ptr {
                     let ref_value = &var_ref.value;
                     if let Value::Ref(r) = &*ref_value.borrow() {
                         Value::Ref(Rc::clone(&r))
                     } else {
                         let val = Rc::clone(ref_value);
                         Value::Ref(val)
+                    }
+                } else {
+                    let ref_value = &var_ref.value;
+                    if let Value::Ref(r) = &*ref_value.borrow() {
+                        Value::Ref(Rc::clone(&r))
+                    } else {
+                        var_ref.value.borrow().clone()
                     }
                 }
             }
@@ -912,7 +931,7 @@ pub fn push_to_array<'a>(
         let arg_res_option = eval_node(vars, Rc::clone(&functions), structs, scope, arg, stdout);
 
         if let (Some(arg_res), _) = arg_res_option {
-            let val = get_eval_value(vars, arg_res, true);
+            let val = get_eval_value(vars, arg_res, false);
             if !ensure_type(&arr_type, &val) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
@@ -1202,6 +1221,7 @@ pub fn get_struct_access_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<
 pub fn is_sequence(tokens: &mut Vec<Option<Token>>) -> bool {
     let mut open_brackets = 0;
     let mut semicolons = 0;
+    let mut closed_blocks = 0;
 
     for i in 0..tokens.len() {
         match tokens[i].as_ref().unwrap() {
@@ -1216,6 +1236,9 @@ pub fn is_sequence(tokens: &mut Vec<Option<Token>>) -> bool {
             }
             Token::RBrace => {
                 open_brackets -= 1;
+                if open_brackets == 0 {
+                    closed_blocks += 1;
+                }
             }
             Token::LBracket => {
                 open_brackets += 1;
@@ -1234,7 +1257,7 @@ pub fn is_sequence(tokens: &mut Vec<Option<Token>>) -> bool {
 
     // <= 1 because sequences with 1 semicolon can be
     // seen as single lines
-    open_brackets == 0 && semicolons > 0
+    open_brackets == 0 && (semicolons > 0 || closed_blocks > 1)
 }
 
 pub fn create_comp_node<'a>(
@@ -1291,7 +1314,7 @@ pub fn create_comp_node<'a>(
             }
             Token::LAngleEq => true,
             Token::RAngleEq => true,
-            _ => return None,
+            _ => false,
         } && open_parens == 0
         {
             for j in 0..i {
@@ -1587,7 +1610,7 @@ pub fn index_arr_var_value(
 ) -> Value {
     match &*arr.borrow().value.borrow() {
         Value::Array(arr, _) => {
-            let index = get_eval_value(vars, index, true);
+            let index = get_eval_value(vars, index, false);
 
             if let Value::Usize(val) = index {
                 arr[val].clone()
@@ -1610,11 +1633,11 @@ pub fn set_index_arr<'a>(
     value: AstNode,
 ) {
     if let (Some(value), _) = eval_node(vars, functions, structs, scope, &value, stdout) {
-        let index_val = get_eval_value(vars, index, false);
+        let index_val = get_eval_value(vars, index, true);
         match index_val {
             Value::Usize(val) => match *arr.borrow_mut().value.borrow_mut() {
                 Value::Array(ref mut arr_val, _) => {
-                    arr_val[val] = get_eval_value(vars, value, false);
+                    arr_val[val] = get_eval_value(vars, value, true);
                 }
                 _ => panic!("Only arrays can be indexed"),
             },

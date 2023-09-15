@@ -7,7 +7,7 @@ use crate::{
         get_exp_node, get_struct_access_tokens, get_type_expression, is_exp, is_sequence,
         tokens_to_delimiter,
     },
-    interpreter::{CustomFunc, EvalValue, StructInfo, StructProp, VarType},
+    interpreter::{CustomFunc, StructInfo, StructProp, VarType},
     tokenizer::Token,
 };
 
