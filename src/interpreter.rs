@@ -425,7 +425,9 @@ pub fn eval_exp<'a>(
 }
 
 macro_rules! for_loop {
-    ($stdout:ident, $vars:ident, $functions:ident, $structs:expr, $scope:expr, $variant:ident, $type:ty, $start:expr, $to:expr, $inc:expr, $node:ident, $name:expr) => {
+    ($stdout:ident, $vars:ident, $functions:ident, $structs:expr, $scope:expr, $variant:ident, $type:ty, $start:expr, $to:expr, $inc:expr, $node:ident, $name:expr) => {{
+        let mut res: Option<QuitType> = None;
+
         let to_num = match $to {
             Value::$variant(num) => num,
             _ => panic!("Expected from to and inc to be of same type"),
@@ -448,7 +450,7 @@ macro_rules! for_loop {
 
         if inc >= 0 {
             while current < to_num {
-                eval_node(
+                let (_, quit) = eval_node(
                     $vars,
                     Rc::clone(&$functions),
                     $structs,
@@ -456,6 +458,11 @@ macro_rules! for_loop {
                     $node.as_ref(),
                     $stdout,
                 );
+
+                if quit.is_some() {
+                    res = quit;
+                    break;
+                }
 
                 current += inc;
 
@@ -464,7 +471,7 @@ macro_rules! for_loop {
             }
         } else {
             while to_num < current {
-                eval_node(
+                let (_, quit) = eval_node(
                     $vars,
                     Rc::clone(&$functions),
                     $structs,
@@ -473,13 +480,20 @@ macro_rules! for_loop {
                     $stdout,
                 );
 
+                if quit.is_some() {
+                    res = quit;
+                    break;
+                }
+
                 current += inc;
 
                 let var_ptr = $vars.get(&$name).unwrap();
                 *var_ptr.borrow_mut().value.borrow_mut() = Value::$variant(current);
             }
         }
-    };
+
+        res
+    }};
 }
 
 #[derive(Debug)]
@@ -644,7 +658,7 @@ pub fn eval_node<'a>(
                     None
                 };
 
-                match from_val {
+                let res = match from_val {
                     Value::Int(start) => {
                         for_loop!(
                             stdout,
@@ -659,7 +673,7 @@ pub fn eval_node<'a>(
                             inc_val,
                             node,
                             var_name.to_owned()
-                        );
+                        )
                     }
                     Value::Usize(start) => {
                         for_loop!(
@@ -675,7 +689,7 @@ pub fn eval_node<'a>(
                             inc_val,
                             node,
                             var_name.to_owned()
-                        );
+                        )
                     }
                     Value::Long(start) => {
                         for_loop!(
@@ -691,9 +705,13 @@ pub fn eval_node<'a>(
                             inc_val,
                             node,
                             var_name.to_owned()
-                        );
+                        )
                     }
                     _ => panic!("Unexpected start type in for loop, expected int or long"),
+                };
+
+                if res.is_some() {
+                    return (None, res);
                 }
             } else {
                 panic!("Expected identifier for loop iterator");
