@@ -1354,57 +1354,6 @@ pub fn create_comp_node<'a>(
     None
 }
 
-// macro_rules! compare_var_type {
-//     ($type1:expr, $type2:expr) => {
-//         match $type1 {
-//             VarType::Usize => match $type2 {
-//                 VarType::Usize => true,
-//                 _ => false,
-//             },
-//             VarType::Int => match $type2 {
-//                 VarType::Int => true,
-//                 _ => false,
-//             },
-//             VarType::Float => match $type2 {
-//                 VarType::Float => true,
-//                 _ => false,
-//             },
-//             VarType::Double => match $type2 {
-//                 VarType::Double => true,
-//                 _ => false,
-//             },
-//             VarType::Long => match $type2 {
-//                 VarType::Long => true,
-//                 _ => false,
-//             },
-//             VarType::String => match $type2 {
-//                 VarType::String => true,
-//                 _ => false,
-//             },
-//             VarType::Bool => match $type2 {
-//                 VarType::Bool => true,
-//                 _ => false,
-//             },
-//             VarType::Array(vals1) => match $type2 {
-//                 VarType::Array(vals2) => compare_var_type(vals1.as_ref(), vals2.as_ref()),
-//                 _ => false,
-//             },
-//             VarType::Struct(name1, _) => match $type2 {
-//                 VarType::Struct(name2, _) => name1 == name2,
-//                 _ => false,
-//             },
-//             VarType::Null => match $type2 {
-//                 VarType::Null => true,
-//                 _ => false,
-//             },
-//         }
-//     };
-// }
-
-// pub fn compare_var_type(type1: &VarType, type2: &VarType) -> bool {
-//     compare_var_type!(type1, type2)
-// }
-
 macro_rules! comp {
     ($left:expr, $right:expr, ==, $($variants:ident),*) => {
         {

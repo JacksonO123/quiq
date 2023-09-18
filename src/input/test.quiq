@@ -1,7 +1,2 @@
-int[] a = <int>[];
-int i = 0;
-while (i < 1000000) {
-  a.push(i);
-  i = i + 1;
-}
-print(a);
+long a = long(123);
+print(type(a));
