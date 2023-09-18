@@ -173,6 +173,8 @@ pub enum AstNode {
         Option<Box<AstNode>>,
         Box<AstNode>,
     ),
+    /// exp node
+    While(Vec<Box<AstNode>>, Box<AstNode>),
     IndexArr(Token, Box<AstNode>),
     /// arr ident, index, value
     SetArrIndex(Token, Box<AstNode>, Box<AstNode>),

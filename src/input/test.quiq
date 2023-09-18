@@ -1,8 +1,7 @@
-func test() int {
-  for (i; 0; 10) {
-    return 10;
-  }
+int[] a = <int>[];
+int i = 0;
+while (i < 1000000) {
+  a.push(i);
+  i = i + 1;
 }
-
-int a = test();
 print(a);

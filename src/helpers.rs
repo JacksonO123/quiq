@@ -244,7 +244,15 @@ pub fn create_keyword_node<'a>(
                 panic!("Expected block to loop");
             }
         }
-        Keyword::While => unimplemented!(),
+        Keyword::While => {
+            // [while, (, ... exp ..., ), {]
+            let mut exp_tokens = tokens_to_delimiter(tokens, 2, ")");
+            let exp_node = get_exp_node(structs, &mut exp_tokens);
+            let mut block_tokens = tokens_to_delimiter(tokens, 5 + exp_tokens.len(), "}");
+            let block_node = get_ast_node(structs, &mut block_tokens).unwrap();
+
+            Some(AstNode::While(exp_node, Box::new(block_node)))
+        }
         Keyword::Struct => {
             // [struct, name, {]
             let name_option = tokens[1].as_ref().unwrap().clone();

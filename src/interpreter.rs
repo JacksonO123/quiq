@@ -618,6 +618,37 @@ pub fn eval_node<'a>(
                 panic!("Expected value to index array with");
             }
         }
+        AstNode::While(condition, block) => {
+            loop {
+                let res = eval_exp(
+                    vars,
+                    Rc::clone(&functions),
+                    structs,
+                    scope,
+                    condition,
+                    stdout,
+                );
+
+                let val = get_eval_value(vars, res, false);
+
+                if let Value::Bool(v) = val {
+                    if !v {
+                        break;
+                    }
+                } else {
+                    panic!("Expected bool in while loop");
+                }
+
+                let (_, quit) =
+                    eval_node(vars, Rc::clone(&functions), structs, scope, block, stdout);
+
+                if quit.is_some() {
+                    return (None, quit);
+                }
+            }
+
+            (None, None)
+        }
         AstNode::ForFromTo(ident, from, to, inc, node) => {
             if let Token::Identifier(var_name) = ident {
                 let from_val = match eval_node(
