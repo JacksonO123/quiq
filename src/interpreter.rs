@@ -963,7 +963,8 @@ pub fn eval_node<'a>(
                 None,
             )
         }
-        AstNode::If(condition, node) => {
+        AstNode::Else(_) => unreachable!(),
+        AstNode::If(condition, node, else_branch) => {
             let (condition_res, _) = eval_node(
                 vars,
                 Rc::clone(&functions),
@@ -1013,6 +1014,21 @@ pub fn eval_node<'a>(
 
                     if quit.is_some() {
                         return (None, quit);
+                    }
+                } else {
+                    if let Some(branch) = else_branch {
+                        let (_, quit) = eval_node(
+                            vars,
+                            Rc::clone(&functions),
+                            structs,
+                            scope + 1,
+                            branch.as_ref(),
+                            stdout,
+                        );
+
+                        if quit.is_some() {
+                            return (None, quit);
+                        }
                     }
                 }
             } else {

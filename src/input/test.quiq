@@ -1,2 +1,10 @@
-long a = long(123);
-print(type(a));
+func test(bool thing) bool {
+  if (thing) {
+    return true;
+  } else {
+    return false;
+  }
+}
+
+bool t = test(false);
+print(t);

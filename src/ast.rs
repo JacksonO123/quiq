@@ -8,7 +8,7 @@ use crate::{
         tokens_to_delimiter,
     },
     interpreter::{CustomFunc, StructInfo, StructProp, VarType},
-    tokenizer::Token,
+    tokenizer::{Keyword, Token},
 };
 
 #[derive(Debug, Clone)]
@@ -158,7 +158,8 @@ pub enum AstNode {
     CallFunc(String, Vec<AstNode>),
     Bang(Box<AstNode>),
     Exp(Vec<Box<AstNode>>),
-    If(Box<AstNode>, Box<AstNode>),
+    If(Box<AstNode>, Box<AstNode>, Option<Box<AstNode>>),
+    Else(Box<AstNode>),
     Array(Vec<AstNode>, VarType),
     AccessStructProp(Token, Vec<AstNode>),
     /// to, node
@@ -425,15 +426,31 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
             continue;
         }
 
-        let mut token_slice = get_sequence_slice(tokens, i);
+        let mut offset = 0;
+        if i > 0 {
+            if let Token::Keyword(Keyword::Else) = tokens[i - 1].as_ref().unwrap() {
+                offset += 1;
+            }
+        }
+        let mut token_slice = get_sequence_slice(tokens, i - offset);
         let token_num = token_slice.len();
 
         let node_option = get_ast_node(structs, &mut token_slice);
         if let Some(node) = node_option {
-            let ptr = Rc::new(RefCell::new(node));
-            seq.push(ptr);
+            if let AstNode::Else(block) = node {
+                if seq.len() > 0 {
+                    if let AstNode::If(_, _, ref mut else_block) =
+                        &mut *seq[seq.len() - 1].borrow_mut()
+                    {
+                        *else_block = Some(block);
+                    }
+                }
+            } else {
+                let ptr = Rc::new(RefCell::new(node));
+                seq.push(ptr);
+            }
         }
-        i += token_num + 1;
+        i += token_num + 1 + offset;
     }
 
     AstNode::StatementSeq(seq)

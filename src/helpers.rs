@@ -191,7 +191,7 @@ pub fn create_keyword_node<'a>(
 
             if let Some(c_node) = condition_node {
                 if let Some(tr_node) = to_run_node {
-                    Some(AstNode::If(Box::new(c_node), Box::new(tr_node)))
+                    Some(AstNode::If(Box::new(c_node), Box::new(tr_node), None))
                 } else {
                     panic!("Expected block for `if`");
                 }
@@ -199,7 +199,12 @@ pub fn create_keyword_node<'a>(
                 panic!("Expected condition for `if`");
             }
         }
-        Keyword::Else => unimplemented!(),
+        Keyword::Else => {
+            let mut block_tokens = tokens_to_delimiter(tokens, 2, "}");
+            let block_ast = get_ast_node(structs, &mut block_tokens).unwrap();
+
+            Some(AstNode::Else(Box::new(block_ast)))
+        }
         Keyword::For => {
             // 2 because tokens: [for, (]
             let mut range_tokens = tokens_to_delimiter(tokens, 2, ")");
