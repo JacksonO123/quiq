@@ -76,6 +76,7 @@ pub enum Value {
     /// struct type name, shape, props
     Struct(String, StructShape, Vec<StructProp>),
     Ref(Rc<RefCell<Value>>),
+    Fn(Rc<RefCell<CustomFunc>>),
 }
 impl Value {
     pub fn get_str(&self) -> String {
@@ -115,6 +116,13 @@ impl Value {
 
                 res
             }
+            Value::Fn(func) => {
+                "func: (".to_owned()
+                    + format!("{:?}", func.borrow().params).as_str()
+                    + ") { "
+                    + format!("{:?}", func.borrow().return_type).as_str()
+                    + " }"
+            }
         }
     }
     pub fn get_enum_str(&self) -> String {
@@ -129,6 +137,7 @@ impl Value {
             Value::Bool(_) => String::from("bool"),
             Value::Struct(_, _, _) => String::from("struct"),
             Value::Null => String::from("null"),
+            Value::Fn(_) => String::from("fn"),
             Value::Array(arr, arr_type) => {
                 format!("{:?}[{:?}]", arr_type, arr)
             }

@@ -1,10 +1,13 @@
-func test(bool thing) bool {
-  if (thing) {
-    return true;
-  } else {
-    return false;
-  }
+struct Test {
+  thing: bool;
 }
 
-bool t = test(false);
-print(t);
+fn<Test, int> test = func (bool thing) int {
+  print("in func!");
+  return 5;
+};
+
+print(test);
+
+int res = test(true);
+print(res);

@@ -83,7 +83,7 @@ pub fn create_make_var_node<'a>(
                 _ => None,
             };
             if let Some(n) = name {
-                if let Some(t) = is_generic_type(&n, structs, tokens) {
+                if let Some(t) = get_builtin_generic(&n, structs, tokens) {
                     t
                 } else {
                     panic!("Type {} is not generic", n);
@@ -279,8 +279,14 @@ pub fn create_keyword_node<'a>(
         Keyword::Func => {
             // [func, name, (, ...params..., ), return_type, {]
             let name_option = tokens[1].take().unwrap();
-            let mut param_tokens = tokens_to_delimiter(tokens, 3, ")");
-            let mut return_type_tokens = tokens_to_delimiter(tokens, 4 + param_tokens.len(), "{");
+            let offset = if let Token::LParen = name_option {
+                1
+            } else {
+                0
+            };
+            let mut param_tokens = tokens_to_delimiter(tokens, 3 - offset, ")");
+            let mut return_type_tokens =
+                tokens_to_delimiter(tokens, 4 - offset + param_tokens.len(), "{");
 
             if return_type_tokens.len() == 0 {
                 panic!("Expected return type for function");
@@ -289,7 +295,7 @@ pub fn create_keyword_node<'a>(
             let return_type = get_type_expression(&mut return_type_tokens, structs);
             let mut block_tokens = tokens_to_delimiter(
                 tokens,
-                6 + param_tokens.len() + return_type_tokens.len(),
+                6 - offset + param_tokens.len() + return_type_tokens.len(),
                 "}",
             );
             let block_node = get_ast_node(structs, &mut block_tokens)
@@ -297,12 +303,14 @@ pub fn create_keyword_node<'a>(
 
             let params = get_param_definitions(structs, &mut param_tokens);
 
-            if let Token::Identifier(name) = name_option {
-                let func = CustomFunc::new(name, params, return_type, block_node);
-                Some(AstNode::MakeFunc(Rc::new(RefCell::new(func))))
-            } else {
-                panic!("Expected identifier for func name")
-            }
+            let func_name = match name_option {
+                Token::Identifier(name) => name,
+                Token::LParen => String::from(""),
+                _ => panic!("Expected identifier for func name"),
+            };
+
+            let func = CustomFunc::new(func_name, params, return_type, block_node);
+            Some(AstNode::MakeFunc(Rc::new(RefCell::new(func))))
         }
         Keyword::Return => {
             let mut val_tokens = tokens_to_delimiter(tokens, 1, ";");
@@ -757,7 +765,7 @@ pub fn get_type_expression(tokens: &mut Vec<Option<Token>>, structs: &mut Struct
             match structs.available_structs.get(&ident) {
                 Some(v) => VarType::Struct(ident.clone(), v.clone()),
                 None => {
-                    let generic_type = is_generic_type(&ident, structs, tokens);
+                    let generic_type = get_builtin_generic(&ident, structs, tokens);
                     generic_type.expect("Expected type or struct name for type expression")
                 }
             }
@@ -816,6 +824,65 @@ pub fn create_arr<'a>(
     AstNode::Array(node_arr, arr_type)
 }
 
+fn compare_types(type1: &VarType, type2: &VarType) -> bool {
+    match type1 {
+        VarType::Int => match type2 {
+            VarType::Int => true,
+            _ => false,
+        },
+        VarType::Long => match type2 {
+            VarType::Long => true,
+            _ => false,
+        },
+        VarType::Double => match type2 {
+            VarType::Double => true,
+            _ => false,
+        },
+        VarType::Float => match type2 {
+            VarType::Float => true,
+            _ => false,
+        },
+        VarType::Bool => match type2 {
+            VarType::Bool => true,
+            _ => false,
+        },
+        VarType::String => match type2 {
+            VarType::String => true,
+            _ => false,
+        },
+        VarType::Null => match type2 {
+            VarType::Null => true,
+            _ => false,
+        },
+        VarType::Void => match type2 {
+            VarType::Void => true,
+            _ => false,
+        },
+        VarType::Usize => match type2 {
+            VarType::Usize => true,
+            _ => false,
+        },
+        VarType::Ref(r1) => match type2 {
+            VarType::Ref(r2) => compare_types(r1.as_ref(), r2.as_ref()),
+            _ => false,
+        },
+        VarType::Struct(name1, _) => match type2 {
+            VarType::Struct(name2, _) => name1 == name2,
+            _ => false,
+        },
+        VarType::Array(a1) => match type2 {
+            VarType::Array(a2) => compare_types(a1.as_ref(), a2.as_ref()),
+            _ => false,
+        },
+        VarType::Fn(params1, return1) => match type2 {
+            VarType::Fn(params2, return2) => {
+                compare_types(params1.as_ref(), params2.as_ref()) && compare_types(return1, return2)
+            }
+            _ => false,
+        },
+    }
+}
+
 pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
     match val {
         Value::Ref(ref_ptr) => match var_type {
@@ -855,6 +922,29 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
         },
         Value::Bool(_) => match var_type {
             VarType::Bool => true,
+            _ => false,
+        },
+        Value::Fn(func) => match var_type {
+            VarType::Fn(param_type, return_type1) => {
+                let temp = &*func.borrow_mut();
+                let return_type2 = &temp.return_type;
+                if let VarType::Struct(_, shape) = param_type.as_ref() {
+                    if shape.props.iter().len() != temp.params.len() {
+                        return false;
+                    }
+                    for param in temp.params.iter() {
+                        let shape_param = shape.props.get(&param.name);
+                        if let Some(param_type) = shape_param {
+                            if !compare_types(param_type, &param.param_type) {
+                                return false;
+                            }
+                        }
+                    }
+                } else {
+                    return false;
+                }
+                compare_types(return_type1, return_type2)
+            }
             _ => false,
         },
         Value::Array(arr, _) => match var_type {
@@ -973,6 +1063,15 @@ fn type_from_value(val: &Value) -> VarType {
         Value::Bool(_) => VarType::Bool,
         Value::Struct(name, shape, _) => VarType::Struct(name.clone(), shape.clone()),
         Value::Array(_, arr_type) => VarType::Array(Box::new(arr_type.clone())),
+        Value::Fn(func) => {
+            let return_type = func.borrow().return_type.clone();
+            let mut param_shape = StructShape::new();
+            for param in func.borrow().params.iter() {
+                param_shape.add(param.name.clone(), param.param_type.clone())
+            }
+            let param_struct = VarType::Struct(String::from(""), param_shape);
+            VarType::Fn(Box::new(param_struct), Box::new(return_type))
+        }
     }
 }
 
@@ -1002,6 +1101,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
     match val {
         Value::Ref(_) => panic!("Cannot cast ref"),
         Value::Null => panic!("Cannot cast null"),
+        Value::Fn(_) => panic!("Cannot cast fn"),
         Value::Usize(v) => match to_type {
             VarType::Usize => val,
             VarType::Int => Value::Int(v as i32),
@@ -1023,6 +1123,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Null => cast_panic!("usize", "null"),
             VarType::Ref(_) => cast_panic!("usize", "ref"),
             VarType::Void => cast_panic!("usize", "void"),
+            VarType::Fn(_, _) => cast_panic!("usize", "fn"),
         },
         Value::String(v) => match to_type {
             VarType::Usize => {
@@ -1043,6 +1144,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Null => cast_panic!("string", "null"),
             VarType::Ref(_) => cast_panic!("string", "ref"),
             VarType::Void => cast_panic!("string", "void"),
+            VarType::Fn(_, _) => cast_panic!("string", "fn"),
         },
         Value::Int(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1065,6 +1167,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Null => cast_panic!("int", "null"),
             VarType::Ref(_) => cast_panic!("int", "ref"),
             VarType::Void => cast_panic!("int", "void"),
+            VarType::Fn(_, _) => cast_panic!("int", "fn"),
         },
         Value::Float(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1087,6 +1190,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Null => cast_panic!("float", "null"),
             VarType::Ref(_) => cast_panic!("float", "ref"),
             VarType::Void => cast_panic!("float", "void"),
+            VarType::Fn(_, _) => cast_panic!("float", "fn"),
         },
         Value::Double(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1109,6 +1213,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Null => cast_panic!("double", "null"),
             VarType::Ref(_) => cast_panic!("double", "ref"),
             VarType::Void => cast_panic!("double", "void"),
+            VarType::Fn(_, _) => cast_panic!("double", "fn"),
         },
         Value::Long(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1131,6 +1236,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Null => cast_panic!("long", "null"),
             VarType::Ref(_) => cast_panic!("long", "ref"),
             VarType::Void => cast_panic!("long", "void"),
+            VarType::Fn(_, _) => cast_panic!("long", "fn"),
         },
         Value::Bool(v) => {
             let num_val = if v { 1 } else { 0 };
@@ -1147,6 +1253,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 VarType::Null => cast_panic!("bool", "null"),
                 VarType::Ref(_) => cast_panic!("bool", "ref"),
                 VarType::Void => cast_panic!("bool", "void"),
+                VarType::Fn(_, _) => cast_panic!("bool", "fn"),
             }
         }
         Value::Array(arr, _) => match to_type {
@@ -1162,6 +1269,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Null => cast_panic!("array", "null"),
             VarType::Ref(_) => cast_panic!("array", "ref"),
             VarType::Void => cast_panic!("array", "void"),
+            VarType::Fn(_, _) => cast_panic!("array", "fn"),
         },
         Value::Struct(_, _, _) => panic!("Cannot cast structs"),
     }
@@ -1198,14 +1306,7 @@ pub fn get_struct_access_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<
                 }
                 Token::Identifier(_) => false,
                 Token::LParen => false,
-                Token::EqSet => {
-                    // let index = res.len() - 1;
-                    // res[index].push(Some(tokens[i].take().unwrap()));
-                    // res.push(vec![]);
-                    // i += 1;
-                    // continue;
-                    false
-                }
+                Token::EqSet => false,
                 _ => true,
             }
         {
@@ -1277,9 +1378,12 @@ pub fn create_comp_node<'a>(
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
 ) -> Option<AstNode> {
-    // TODO
-    // check for cases like this: if ((i < 10)) { ... }
-    // should be treated like: if (i < 10) { ... }
+    if let Token::Identifier(name) = tokens[0].as_ref().unwrap().clone() {
+        if is_builtin_generic(&name) {
+            return None;
+        }
+    }
+
     let mut temp_tokens = vec![];
     let mut open_parens = 0;
 
@@ -1301,10 +1405,7 @@ pub fn create_comp_node<'a>(
                 if i == 0 || i == tokens.len() - 1 {
                     return None;
                 } else {
-                    if match tokens[i - 1].as_ref().unwrap() {
-                        Token::EqSet => true,
-                        _ => false,
-                    } {
+                    if let Token::EqSet = tokens[i - 1].as_ref().unwrap() {
                         return None;
                     } else {
                         true
@@ -1315,10 +1416,7 @@ pub fn create_comp_node<'a>(
                 if i == 0 || i == tokens.len() - 1 {
                     return None;
                 } else {
-                    if match tokens[i - 1].as_ref().unwrap() {
-                        Token::EqSet => true,
-                        _ => false,
-                    } {
+                    if let Token::EqSet = tokens[i - 1].as_ref().unwrap() {
                         return None;
                     } else {
                         true
@@ -1388,7 +1486,8 @@ macro_rules! comp {
                     Value::Null => Ok(true),
                     _ => Ok(false),
                 }
-                Value::Ref(_) => Err(String::from("Cannot compare refs"))
+                Value::Ref(_) => Err(String::from("Cannot compare refs")),
+                Value::Fn(_) => Err(String::from("Cannot compare functions"))
             }
         }
     };
@@ -1405,7 +1504,8 @@ macro_rules! comp {
                 Value::Array(_, _) => Err(String::from("Arrays can only be compared with `==` operator")),
                 Value::Struct(_, _, _) => Err(String::from("Structs can only be compared with `==` operator")),
                 Value::Null => Err(String::from("Null can only be compared with `==` operator")),
-                Value::Ref(_) => Err(String::from("Cannot compare refs"))
+                Value::Ref(_) => Err(String::from("Cannot compare refs")),
+                Value::Fn(_) => Err(String::from("Cannot compare functions"))
             }
         }
     };
@@ -1668,7 +1768,13 @@ pub fn create_struct_node<'a>(
     AstNode::CreateStruct(name.clone(), shape, props)
 }
 
-fn is_generic_type(
+const BUILTIN_GENERIC: [&'static str; 2] = ["ref", "fn"];
+
+fn is_builtin_generic(name: &String) -> bool {
+    BUILTIN_GENERIC.iter().position(|&s| s == name).is_some()
+}
+
+fn get_builtin_generic(
     name: &String,
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
@@ -1702,6 +1808,24 @@ fn is_generic_type(
             }
 
             Some(VarType::Ref(Box::new(generic_type)))
+        }
+        "fn" => {
+            let param_tokens = tokens_to_delimiter(tokens, 2, ",");
+            let param_type = if let Token::Identifier(ident) = param_tokens[0].as_ref().unwrap() {
+                let struct_info = structs.available_structs.get(ident.as_str());
+                if let Some(struct_shape) = struct_info {
+                    VarType::Struct(ident.clone(), struct_shape.clone())
+                } else {
+                    panic!("Unexpected type {}", ident);
+                }
+            } else {
+                panic!("Expected struct ident for param type");
+            };
+
+            let mut return_tokens = tokens_to_delimiter(tokens, 3 + param_tokens.len(), ">");
+            let return_type = get_type_expression(&mut return_tokens, structs);
+
+            Some(VarType::Fn(Box::new(param_type), Box::new(return_type)))
         }
         _ => None,
     }

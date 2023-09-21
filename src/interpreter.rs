@@ -46,8 +46,8 @@ pub struct CustomFunc {
     name: String,
     scope: usize,
     block: AstNode,
-    return_type: VarType,
-    params: Vec<FuncParam>,
+    pub return_type: VarType,
+    pub params: Vec<FuncParam>,
 }
 impl CustomFunc {
     pub fn new(name: String, params: Vec<FuncParam>, return_type: VarType, block: AstNode) -> Self {
@@ -167,6 +167,7 @@ pub enum VarType {
     Null,
     Ref(Box<VarType>),
     Void,
+    Fn(Box<VarType>, Box<VarType>),
 }
 impl VarType {
     pub fn from(string: &str) -> Self {
@@ -195,6 +196,7 @@ impl VarType {
             VarType::Struct(_, _) => "struct",
             VarType::Null => "null",
             VarType::Void => "void",
+            VarType::Fn(_, _) => "fn",
         }
     }
 }
@@ -314,6 +316,20 @@ fn call_func<'a>(
                     return f(vars, args, stdout);
                 }
             }
+        }
+    }
+
+    let var_func = vars.get(name);
+    if let Some(func) = var_func {
+        let func_clone = func.clone();
+        let val = &*func_clone.borrow().value;
+        let val = &*val.borrow();
+
+        if let Value::Fn(f) = val {
+            let f = &*f.borrow();
+            return f.call(vars, Rc::clone(&functions), structs, scope, stdout, args);
+        } else {
+            panic!("Unknown function: {}", name);
         }
     }
 
@@ -1078,7 +1094,7 @@ pub fn eval_node<'a>(
         AstNode::MakeFunc(func) => {
             func.borrow_mut().set_scope(scope);
             functions.borrow_mut().push(Func::Custom(Rc::clone(func)));
-            (None, None)
+            (Some(EvalValue::Value(Value::Fn(Rc::clone(func)))), None)
         }
         AstNode::SetVar(name, value) => {
             let value = eval_node(vars, functions, structs, scope, value.as_ref(), stdout);
