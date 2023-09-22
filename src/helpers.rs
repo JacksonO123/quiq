@@ -54,7 +54,12 @@ pub fn make_var<'a>(
             panic!("Expected identifier for variable name");
         };
 
-        let var = Rc::new(RefCell::new(VarValue::new(var_name.clone(), val, scope)));
+        let var = Rc::new(RefCell::new(VarValue::new(
+            var_name.clone(),
+            val,
+            var_type.clone(),
+            scope,
+        )));
         vars.insert(var_name.clone(), var);
     } else {
         panic!("Expected {} found void", var_type.get_str());
@@ -500,8 +505,8 @@ pub fn set_var_value<'a>(
         let var_value = &value_ref.value;
         let var_value_type = type_from_value(&*(var_value.borrow()));
         match var_value_type {
-            VarType::Ref(ref ref_type) => {
-                if ensure_type(&*ref_type, &value) {
+            VarType::Ref(_) => {
+                if compare_types(&value_ref.var_type, &var_value_type) {
                     if let Value::Ref(ref mut inner_val) = &mut *value_ref.value.borrow_mut() {
                         *inner_val.borrow_mut() = value;
                     }
@@ -514,7 +519,7 @@ pub fn set_var_value<'a>(
                 }
             }
             _ => {
-                if ensure_type(&var_value_type, &value) {
+                if compare_types(&value_ref.var_type, &var_value_type) {
                     *value_ref.value.borrow_mut() = value;
                 } else {
                     panic!(
@@ -769,16 +774,16 @@ pub fn get_type_expression(tokens: &mut Vec<Option<Token>>, structs: &mut Struct
     let first_type = if let Token::Type(t) = first_token {
         t
     } else {
-        if let Token::Identifier(ident) = first_token {
-            match structs.available_structs.get(&ident) {
+        match first_token {
+            Token::Identifier(ident) => match structs.available_structs.get(&ident) {
                 Some(v) => VarType::Struct(ident.clone(), v.clone()),
                 None => {
                     let generic_type = get_builtin_generic(&ident, structs, tokens);
                     generic_type.expect("Expected type or struct name for type expression")
                 }
-            }
-        } else {
-            panic!("Expected type or struct name for type expression");
+            },
+            Token::Null => VarType::Null,
+            _ => panic!("Expected type or struct name for type expression"),
         }
     };
     if tokens.len() == 1 {
@@ -888,7 +893,37 @@ fn compare_types(type1: &VarType, type2: &VarType) -> bool {
             }
             _ => false,
         },
+        VarType::Union(types) => in_union(types, type2),
     }
+}
+
+fn in_union(union: &Vec<VarType>, t: &VarType) -> bool {
+    if let VarType::Union(types) = t {
+        'outer: for union_item1 in union.iter() {
+            let mut found = false;
+
+            for union_item2 in types.iter() {
+                if compare_types(union_item1, union_item2) {
+                    found = true;
+                    break 'outer;
+                }
+            }
+
+            if !found {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    for union_item in union.iter() {
+        if compare_types(union_item, t) {
+            return true;
+        }
+    }
+
+    false
 }
 
 pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
@@ -1132,6 +1167,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Ref(_) => cast_panic!("usize", "ref"),
             VarType::Void => cast_panic!("usize", "void"),
             VarType::Fn(_, _) => cast_panic!("usize", "fn"),
+            VarType::Union(_) => cast_panic!("usize", "union"),
         },
         Value::String(v) => match to_type {
             VarType::Usize => {
@@ -1153,6 +1189,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Ref(_) => cast_panic!("string", "ref"),
             VarType::Void => cast_panic!("string", "void"),
             VarType::Fn(_, _) => cast_panic!("string", "fn"),
+            VarType::Union(_) => cast_panic!("string", "union"),
         },
         Value::Int(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1176,6 +1213,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Ref(_) => cast_panic!("int", "ref"),
             VarType::Void => cast_panic!("int", "void"),
             VarType::Fn(_, _) => cast_panic!("int", "fn"),
+            VarType::Union(_) => cast_panic!("int", "union"),
         },
         Value::Float(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1199,6 +1237,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Ref(_) => cast_panic!("float", "ref"),
             VarType::Void => cast_panic!("float", "void"),
             VarType::Fn(_, _) => cast_panic!("float", "fn"),
+            VarType::Union(_) => cast_panic!("float", "union"),
         },
         Value::Double(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1222,6 +1261,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Ref(_) => cast_panic!("double", "ref"),
             VarType::Void => cast_panic!("double", "void"),
             VarType::Fn(_, _) => cast_panic!("double", "fn"),
+            VarType::Union(_) => cast_panic!("double", "union"),
         },
         Value::Long(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1245,6 +1285,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Ref(_) => cast_panic!("long", "ref"),
             VarType::Void => cast_panic!("long", "void"),
             VarType::Fn(_, _) => cast_panic!("long", "fn"),
+            VarType::Union(_) => cast_panic!("long", "union"),
         },
         Value::Bool(v) => {
             let num_val = if v { 1 } else { 0 };
@@ -1262,6 +1303,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 VarType::Ref(_) => cast_panic!("bool", "ref"),
                 VarType::Void => cast_panic!("bool", "void"),
                 VarType::Fn(_, _) => cast_panic!("bool", "fn"),
+                VarType::Union(_) => cast_panic!("bool", "union"),
             }
         }
         Value::Array(arr, _) => match to_type {
@@ -1278,6 +1320,7 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::Ref(_) => cast_panic!("array", "ref"),
             VarType::Void => cast_panic!("array", "void"),
             VarType::Fn(_, _) => cast_panic!("array", "fn"),
+            VarType::Union(_) => cast_panic!("array", "union"),
         },
         Value::Struct(_, _, _) => panic!("Cannot cast structs"),
     }
@@ -1776,7 +1819,7 @@ pub fn create_struct_node<'a>(
     AstNode::CreateStruct(name.clone(), shape, props)
 }
 
-const BUILTIN_GENERIC: [&'static str; 2] = ["ref", "fn"];
+const BUILTIN_GENERIC: [&'static str; 3] = ["ref", "fn", "union"];
 
 fn is_builtin_generic(name: &String) -> bool {
     BUILTIN_GENERIC.iter().position(|&s| s == name).is_some()
@@ -1834,6 +1877,30 @@ fn get_builtin_generic(
             let return_type = get_type_expression(&mut return_tokens, structs);
 
             Some(VarType::Fn(Box::new(param_type), Box::new(return_type)))
+        }
+        "union" => {
+            let mut union: Vec<VarType> = vec![];
+
+            let mut type_tokens = tokens_to_delimiter(tokens, 2, ">");
+            let mut first_tokens = tokens_to_delimiter(&mut type_tokens, 0, ",");
+            let first_type = get_type_expression(&mut first_tokens, structs);
+            union.push(first_type);
+
+            let mut offset = first_tokens.len() + 1;
+
+            loop {
+                let mut other_type = tokens_to_delimiter(&mut type_tokens, offset, ",");
+                offset += other_type.len() + 1;
+
+                if other_type.len() == 0 {
+                    break;
+                }
+
+                let type_node = get_type_expression(&mut other_type, structs);
+                union.push(type_node);
+            }
+
+            Some(VarType::Union(union))
         }
         _ => None,
     }

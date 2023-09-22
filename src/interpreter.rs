@@ -168,6 +168,7 @@ pub enum VarType {
     Ref(Box<VarType>),
     Void,
     Fn(Box<VarType>, Box<VarType>),
+    Union(Vec<VarType>),
 }
 impl VarType {
     pub fn from(string: &str) -> Self {
@@ -197,6 +198,7 @@ impl VarType {
             VarType::Null => "null",
             VarType::Void => "void",
             VarType::Fn(_, _) => "fn",
+            VarType::Union(_) => "union",
         }
     }
 }
@@ -206,13 +208,15 @@ pub struct VarValue {
     pub value: Rc<RefCell<Value>>,
     pub scope: usize,
     pub name: String,
+    pub var_type: VarType,
 }
 impl VarValue {
-    pub fn new(name: String, value: Value, scope: usize) -> Self {
+    pub fn new(name: String, value: Value, var_type: VarType, scope: usize) -> Self {
         let ptr = Rc::new(RefCell::new(value));
         Self {
             name,
             value: ptr,
+            var_type,
             scope,
         }
     }
@@ -268,6 +272,7 @@ pub fn value_from_token<'a>(t: &Token, value_type: Option<&VarType>) -> Value {
         }
         Token::String(s) => Value::String(s.to_string()),
         Token::Bool(b) => Value::Bool(*b),
+        Token::Null => Value::Null,
         Token::Identifier(_) => {
             panic!("Cannot get token value of identifier");
         }
@@ -461,7 +466,7 @@ macro_rules! for_loop {
             num as $type
         };
 
-        let var_value = VarValue::new($name, Value::$variant(current), $scope);
+        let var_value = VarValue::new($name, Value::$variant(current), VarType::$variant, $scope);
         $vars.insert($name.clone(), Rc::new(RefCell::new(var_value)));
 
         if inc >= 0 {

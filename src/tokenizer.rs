@@ -71,6 +71,7 @@ pub enum Token {
     RAngle,
     LAngleEq,
     RAngleEq,
+    Null,
 }
 impl Token {
     pub fn get_str(&self) -> &str {
@@ -108,6 +109,7 @@ impl Token {
             Token::RAngle => ">",
             Token::LAngleEq => "<=",
             Token::RAngleEq => ">=",
+            Token::Null => "null",
         }
     }
     pub fn get_token_name(&self) -> &str {
@@ -214,6 +216,8 @@ pub fn tokenize(code: &str) -> Vec<Option<Token>> {
                 // booleans
                 "true" => Token::Bool(true),
                 "false" => Token::Bool(false),
+                // other
+                "null" => Token::Null,
                 _ => {
                     let chars: Vec<char> = value.chars().collect();
                     // check string, check number

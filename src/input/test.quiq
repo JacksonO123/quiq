@@ -1,17 +1,11 @@
-struct Test {
-  thing: bool;
-}
+union<int, null> t = null;
 
-struct Obj {
-  action: fn<Test, int>;
-}
+print(t);
 
-Obj o = <Obj>{
-  action: func (bool thing) int {
-    print("working!!!");
-    return 10;
-  }
-}
+t = 2;
 
-int t = o.action(true);
+print(t);
+
+t = null;
+
 print(t);
