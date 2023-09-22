@@ -1,11 +1,17 @@
-union<int, null> t = null;
+struct Test {
+  val: union<ref<int>, null>;
+}
 
-print(t);
+Test t = <Test>{
+  val: null,
+};
 
-t = 2;
+int a = 2;
 
-print(t);
+t.val = ref(a);
 
-t = null;
+print(t.val, a);
 
-print(t);
+a = 3;
+
+print(t.val, a);

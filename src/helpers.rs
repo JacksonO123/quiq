@@ -837,7 +837,7 @@ pub fn create_arr<'a>(
     AstNode::Array(node_arr, arr_type)
 }
 
-fn compare_types(type1: &VarType, type2: &VarType) -> bool {
+pub fn compare_types(type1: &VarType, type2: &VarType) -> bool {
     match type1 {
         VarType::Int => match type2 {
             VarType::Int => true,
@@ -1024,6 +1024,7 @@ pub fn get_eval_value<'a>(
             Token::Number(_) => value_from_token(&t, None),
             Token::String(_) => value_from_token(&t, None),
             Token::Bool(_) => value_from_token(&t, None),
+            Token::Null => value_from_token(&t, None),
             Token::Identifier(ident) => {
                 let var_ptr = get_var_ptr(vars, &ident);
                 let var_ref = var_ptr.borrow();
@@ -1090,7 +1091,7 @@ pub fn push_to_array<'a>(
     }
 }
 
-fn type_from_value(val: &Value) -> VarType {
+pub fn type_from_value(val: &Value) -> VarType {
     match val {
         Value::Ref(ref_ptf) => {
             let ref_type = type_from_value(&ref_ptf.as_ref().borrow());

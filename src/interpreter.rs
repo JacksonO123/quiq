@@ -3,8 +3,9 @@ use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 use crate::{
     ast::{Ast, AstNode, FuncParam, StructShape, Value},
     helpers::{
-        cast, compare, ensure_type, flatten_exp, get_eval_value, get_prop_ptr, get_ref_value,
-        index_arr_var_value, make_var, push_to_array, set_index_arr, set_var_value, ExpValue,
+        cast, compare, compare_types, ensure_type, flatten_exp, get_eval_value, get_prop_ptr,
+        get_ref_value, index_arr_var_value, make_var, push_to_array, set_index_arr, set_var_value,
+        type_from_value, ExpValue,
     },
     tokenizer::{OperatorType, Token},
 };
@@ -553,7 +554,8 @@ pub fn eval_node<'a>(
 
                     let val_type_option = shape.props.get(prop_name);
                     if let Some(val_type) = val_type_option {
-                        if !ensure_type(val_type, &value) {
+                        let value_type = type_from_value(&value);
+                        if !compare_types(val_type, &value_type) {
                             panic!(
                                 "Type mismatch in struct creation. Expected {:?} found {:?}",
                                 val_type, value
@@ -875,6 +877,7 @@ pub fn eval_node<'a>(
                                         res_val.expect("Expected value to set to struct property"),
                                         true,
                                     );
+                                    println!("{:?}", eval_val);
 
                                     let ptr = if let Token::Identifier(ident) = tok {
                                         get_prop_ptr(props, ident)
