@@ -939,6 +939,28 @@ pub fn eval_node<'a>(
                                         panic!("Array can only be indexed by usize")
                                     };
                                 }
+                                AstNode::CallFunc(name, args) => {
+                                    let prop = get_prop_ptr(props, name);
+
+                                    if let Some(prop_val) = prop {
+                                        if let Value::Fn(func) = &*prop_val.borrow() {
+                                            let func = &*func.borrow();
+                                            let res = func.call(
+                                                vars,
+                                                Rc::clone(&functions),
+                                                structs,
+                                                scope,
+                                                stdout,
+                                                args,
+                                            );
+                                            if let Some(res_val) = res {
+                                                return (Some(EvalValue::Value(res_val)), None);
+                                            }
+                                        }
+                                    } else {
+                                        panic!("Undefined property {}", name);
+                                    }
+                                }
                                 _ => panic!("Unexpected operation: {:?}", path_item),
                             }
                         }

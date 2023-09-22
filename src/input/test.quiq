@@ -2,12 +2,16 @@ struct Test {
   thing: bool;
 }
 
-fn<Test, int> test = func (bool thing) int {
-  print("in func!");
-  return 5;
-};
+struct Obj {
+  action: fn<Test, int>;
+}
 
-print(test);
+Obj o = <Obj>{
+  action: func (bool thing) int {
+    print("working!!!");
+    return 10;
+  }
+}
 
-int res = test(true);
-print(res);
+int t = o.action(true);
+print(t);

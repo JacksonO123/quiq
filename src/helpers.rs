@@ -293,11 +293,8 @@ pub fn create_keyword_node<'a>(
             }
 
             let return_type = get_type_expression(&mut return_type_tokens, structs);
-            let mut block_tokens = tokens_to_delimiter(
-                tokens,
-                6 - offset + param_tokens.len() + return_type_tokens.len(),
-                "}",
-            );
+            let num = 6 - offset * 2 + param_tokens.len() + return_type_tokens.len();
+            let mut block_tokens = tokens_to_delimiter(tokens, num, "}");
             let block_node = get_ast_node(structs, &mut block_tokens)
                 .unwrap_or_else(|| AstNode::StatementSeq(vec![]));
 
@@ -343,23 +340,34 @@ fn create_struct_shape<'a>(
         match prop[0].as_ref().unwrap() {
             Token::RBrace => break,
             _ => {
-                let mut prop_type = match prop[2].as_ref().unwrap() {
+                let mut temp_offset = 0;
+
+                let mut prop_type = match prop[2].clone().as_ref().unwrap() {
                     Token::Type(t) => t.clone(),
                     Token::Identifier(val) => match structs.available_structs.get(val) {
                         Some(shape) => VarType::Struct(val.clone(), shape.clone()),
-                        None => panic!("Unexpected struct type name {}", val),
+                        None => {
+                            let mut clone_tokens: Vec<Option<Token>> =
+                                prop.clone().drain(2..).collect();
+                            if let Some(t) = get_builtin_generic(val, structs, &mut clone_tokens) {
+                                temp_offset = clone_tokens.len() - 1;
+                                t
+                            } else {
+                                panic!("Unexpected struct type name {}", val)
+                            }
+                        }
                     },
                     _ => panic!("Expected type or identifier for struct property type"),
                 };
 
-                let mut array_offset = 3;
+                let mut array_offset = 3 + temp_offset;
                 while array_offset < prop.len() - 1
                     && match prop[array_offset].as_ref().unwrap() {
                         Token::LBracket => true,
                         Token::Semicolon => false,
                         _ => panic!(
                             "Unexpected token: {:?}",
-                            prop[2 + array_offset].as_ref().unwrap()
+                            prop[array_offset].as_ref().unwrap()
                         ),
                     }
                 {

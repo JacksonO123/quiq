@@ -437,8 +437,14 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
 
         let mut offset = 0;
         if i > 0 {
-            if let Token::Keyword(Keyword::Else) = tokens[i - 1].as_ref().unwrap() {
-                offset += 1;
+            match tokens[i - 1].as_ref().unwrap() {
+                Token::Keyword(Keyword::Else) => {
+                    offset += 1;
+                }
+                Token::Keyword(Keyword::Return) => {
+                    offset += 1;
+                }
+                _ => {}
             }
         }
         let mut token_slice = get_sequence_slice(tokens, i - offset);
