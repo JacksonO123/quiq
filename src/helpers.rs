@@ -11,7 +11,7 @@ use crate::{
 
 pub fn make_var<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    functions: Rc<RefCell<Vec<Func<'a>>>>,
+    functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
     scope: usize,
     var_type: &VarType,
@@ -78,7 +78,7 @@ pub fn create_make_var_node<'a>(
         if is_struct {
             if let Token::Identifier(ident) = first_token {
                 let shape = structs.available_structs.get(&ident).unwrap();
-                VarType::Struct(ident.clone(), shape.clone())
+                VarType::Struct(ident.clone(), Rc::clone(&shape))
             } else {
                 panic!("Expected identifier for variable name");
             }
@@ -265,20 +265,18 @@ pub fn create_keyword_node<'a>(
         }
         Keyword::Struct => {
             // [struct, name, {]
-            let name_option = tokens[1].as_ref().unwrap().clone();
+            let name_option = tokens[1].take().unwrap().clone();
+
             let mut shape_tokens = tokens_to_delimiter(tokens, 2, "}");
 
-            let shape = if let Token::Identifier(_) = name_option {
-                create_struct_shape(&mut shape_tokens, structs)
-            } else {
-                panic!("Expected identifier for struct decleration name");
-            };
-
-            if let Token::Identifier(ident) = tokens[1].take().unwrap() {
-                structs.add_available_struct(ident.clone(), shape.clone());
+            if let Token::Identifier(ident) = name_option {
+                let temp_shape = Rc::new(RefCell::new(StructShape::new()));
+                structs.add_available_struct(ident.clone(), Rc::clone(&temp_shape));
+                let shape = create_struct_shape(&mut shape_tokens, structs);
+                *temp_shape.borrow_mut() = shape;
                 None
             } else {
-                panic!("Expected identifier for struct name");
+                panic!("Expected identifier for struct decleration name");
             }
         }
         Keyword::Func => {
@@ -714,7 +712,7 @@ pub enum ExpValue {
 
 pub fn flatten_exp<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    functions: Rc<RefCell<Vec<Func<'a>>>>,
+    functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
     scope: usize,
     exp: &Vec<Box<AstNode>>,
@@ -723,14 +721,7 @@ pub fn flatten_exp<'a>(
     let mut res = vec![];
 
     for exp_node in exp.iter() {
-        let tok_option = eval_node(
-            vars,
-            Rc::clone(&functions),
-            structs,
-            scope,
-            exp_node.as_ref(),
-            stdout,
-        );
+        let tok_option = eval_node(vars, functions, structs, scope, exp_node.as_ref(), stdout);
         if let (Some(tok), _) = tok_option {
             let val = match tok {
                 EvalValue::Token(tok) => match tok {
@@ -972,11 +963,12 @@ pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
                 let temp = &*func.borrow_mut();
                 let return_type2 = &temp.return_type;
                 if let VarType::Struct(_, shape) = param_type.as_ref() {
-                    if shape.props.iter().len() != temp.params.len() {
+                    let shape_borrow = shape.borrow();
+                    if shape_borrow.props.iter().len() != temp.params.len() {
                         return false;
                     }
                     for param in temp.params.iter() {
-                        let shape_param = shape.props.get(&param.name);
+                        let shape_param = shape_borrow.props.get(&param.name);
                         if let Some(param_type) = shape_param {
                             if !compare_types(param_type, &param.param_type) {
                                 return false;
@@ -1066,7 +1058,7 @@ pub fn get_prop_ptr(props: &mut Vec<StructProp>, name: &String) -> Option<Rc<Ref
 
 pub fn push_to_array<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    functions: Rc<RefCell<Vec<Func<'a>>>>,
+    functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
     scope: usize,
     arr: &mut Vec<Value>,
@@ -1075,7 +1067,7 @@ pub fn push_to_array<'a>(
     stdout: &mut Stdout,
 ) {
     for arg in args.iter() {
-        let arg_res_option = eval_node(vars, Rc::clone(&functions), structs, scope, arg, stdout);
+        let arg_res_option = eval_node(vars, functions, structs, scope, arg, stdout);
 
         if let (Some(arg_res), _) = arg_res_option {
             let val = get_eval_value(vars, arg_res, false);
@@ -1105,7 +1097,7 @@ pub fn type_from_value(val: &Value) -> VarType {
         Value::Double(_) => VarType::Double,
         Value::Long(_) => VarType::Long,
         Value::Bool(_) => VarType::Bool,
-        Value::Struct(name, shape, _) => VarType::Struct(name.clone(), shape.clone()),
+        Value::Struct(name, shape, _) => VarType::Struct(name.clone(), Rc::clone(&shape)),
         Value::Array(_, arr_type) => VarType::Array(Box::new(arr_type.clone())),
         Value::Fn(func) => {
             let return_type = func.borrow().return_type.clone();
@@ -1113,7 +1105,8 @@ pub fn type_from_value(val: &Value) -> VarType {
             for param in func.borrow().params.iter() {
                 param_shape.add(param.name.clone(), param.param_type.clone())
             }
-            let param_struct = VarType::Struct(String::from(""), param_shape);
+            let param_struct =
+                VarType::Struct(String::from(""), Rc::new(RefCell::new(param_shape)));
             VarType::Fn(Box::new(param_struct), Box::new(return_type))
         }
     }
@@ -1457,10 +1450,10 @@ pub fn create_comp_node<'a>(
                 if i == 0 || i == tokens.len() - 1 {
                     return None;
                 } else {
-                    if let Token::EqSet = tokens[i - 1].as_ref().unwrap() {
-                        return None;
-                    } else {
-                        true
+                    match tokens[i - 1].as_ref().unwrap() {
+                        Token::EqSet => return None,
+                        Token::Keyword(_) => return None,
+                        _ => true,
                     }
                 }
             }
@@ -1468,10 +1461,10 @@ pub fn create_comp_node<'a>(
                 if i == 0 || i == tokens.len() - 1 {
                     return None;
                 } else {
-                    if let Token::EqSet = tokens[i - 1].as_ref().unwrap() {
-                        return None;
-                    } else {
-                        true
+                    match tokens[i - 1].as_ref().unwrap() {
+                        Token::EqSet => return None,
+                        Token::Keyword(_) => return None,
+                        _ => true,
                     }
                 }
             }
@@ -1738,7 +1731,7 @@ pub fn index_arr_var_value(
 
 pub fn set_index_arr<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    functions: Rc<RefCell<Vec<Func<'a>>>>,
+    functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
     scope: usize,
     stdout: &mut Stdout,
@@ -1765,7 +1758,7 @@ pub fn set_index_arr<'a>(
 pub fn create_struct_node<'a>(
     tokens: &mut Vec<Option<Token>>,
     structs: &mut StructInfo,
-    shape: StructShape,
+    shape: Rc<RefCell<StructShape>>,
     name: &String,
 ) -> AstNode {
     let mut start = 1;

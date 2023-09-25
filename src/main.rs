@@ -34,25 +34,31 @@ fn main() {
     let file = get_file(filename);
     let file_end = file_start.elapsed();
 
-    let tokens_start = Instant::now();
-    let mut tokens = tokenize(file.as_str());
-    let tokens_end = tokens_start.elapsed();
-
     let mut struct_info = StructInfo::new();
+
+    let tokens_start = Instant::now();
+    let mut tokens = tokenize(file.as_str(), &mut struct_info);
+    let tokens_end = tokens_start.elapsed();
 
     let tree_start = Instant::now();
     let tree = generate_tree(&mut struct_info, &mut tokens);
     let tree_end = tree_start.elapsed();
 
     let mut vars: HashMap<String, Rc<RefCell<VarValue>>> = HashMap::new();
-    let functions = Rc::new(RefCell::new(Vec::new()));
+    let mut functions = vec![];
 
-    init_builtins(&mut vars, Rc::clone(&functions));
+    init_builtins(&mut vars, &mut functions);
 
     let mut stdout = io::stdout();
 
     let eval_start = Instant::now();
-    eval(&mut vars, functions, &mut struct_info, tree, &mut stdout);
+    eval(
+        &mut vars,
+        &mut functions,
+        &mut struct_info,
+        tree,
+        &mut stdout,
+    );
     let eval_end = eval_start.elapsed();
 
     let end = start.elapsed();

@@ -74,7 +74,7 @@ pub enum Value {
     Array(Vec<Value>, VarType),
     Null,
     /// struct type name, shape, props
-    Struct(String, StructShape, Vec<StructProp>),
+    Struct(String, Rc<RefCell<StructShape>>, Vec<StructProp>),
     Ref(Rc<RefCell<Value>>),
     Fn(Rc<RefCell<CustomFunc>>),
 }
@@ -189,7 +189,7 @@ pub enum AstNode {
     /// arr ident, index, value
     SetArrIndex(Token, Box<AstNode>, Box<AstNode>),
     /// struct type name, shape, props
-    CreateStruct(String, StructShape, Vec<(String, AstNode)>),
+    CreateStruct(String, Rc<RefCell<StructShape>>, Vec<(String, AstNode)>),
     Return(Box<AstNode>),
 }
 
@@ -273,7 +273,7 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
                                 Some(shape) => Some(create_struct_node(
                                     tokens,
                                     structs,
-                                    shape.clone(),
+                                    Rc::clone(shape),
                                     &ident.clone(),
                                 )),
                                 None => panic!("Struct {} does not exist", ident),

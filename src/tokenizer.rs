@@ -1,4 +1,9 @@
-use crate::interpreter::VarType;
+use std::{cell::RefCell, rc::Rc};
+
+use crate::{
+    ast::StructShape,
+    interpreter::{StructInfo, VarType},
+};
 
 #[derive(Clone, Copy, Debug)]
 pub enum OperatorType {
@@ -181,8 +186,11 @@ fn get_full_line<'a>(chars: &Vec<char>, start: usize) -> String {
     res
 }
 
-pub fn tokenize(code: &str) -> Vec<Option<Token>> {
+pub fn tokenize(code: &str, structs: &mut StructInfo) -> Vec<Option<Token>> {
     let mut tokens = Vec::new();
+
+    let mut found_struct = false;
+
     let mut i = 0;
     let chars: Vec<char> = code.chars().collect();
     while i < chars.len() {
@@ -210,7 +218,10 @@ pub fn tokenize(code: &str) -> Vec<Option<Token>> {
                 "else" => Token::Keyword(Keyword::Else),
                 "for" => Token::Keyword(Keyword::For),
                 "while" => Token::Keyword(Keyword::While),
-                "struct" => Token::Keyword(Keyword::Struct),
+                "struct" => {
+                    found_struct = true;
+                    Token::Keyword(Keyword::Struct)
+                }
                 "func" => Token::Keyword(Keyword::Func),
                 "return" => Token::Keyword(Keyword::Return),
                 // booleans
@@ -224,12 +235,25 @@ pub fn tokenize(code: &str) -> Vec<Option<Token>> {
                     if is_number(&value) {
                         Token::Number(value)
                     } else if chars[0].is_alphabetic() {
+                        if found_struct {
+                            found_struct = false;
+                            structs.add_available_struct(
+                                value.clone(),
+                                Rc::new(RefCell::new(StructShape::new())),
+                            );
+                        }
                         Token::Identifier(value)
                     } else {
                         panic!("Unknown token: {}", value)
                     }
                 }
             };
+            match token {
+                Token::Keyword(Keyword::Struct) => {}
+                _ => {
+                    found_struct = false;
+                }
+            }
         } else if chars[i] == '"' {
             let string = get_string_token(&chars, i);
             i += string.len() + 1;

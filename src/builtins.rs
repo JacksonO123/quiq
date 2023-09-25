@@ -20,9 +20,9 @@ macro_rules! expect_params {
 
 pub fn init_builtins(
     _vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    functions: Rc<RefCell<Vec<Func>>>,
+    functions: &mut Vec<Func>,
 ) {
-    functions.borrow_mut().push(Func::Builtin(BuiltinFunc::new(
+    functions.push(Func::Builtin(BuiltinFunc::new(
         "print",
         |vars, params, stdout| {
             for (i, param) in params.iter().enumerate() {
@@ -52,7 +52,7 @@ pub fn init_builtins(
         },
     )));
 
-    functions.borrow_mut().push(Func::Builtin(BuiltinFunc::new(
+    functions.push(Func::Builtin(BuiltinFunc::new(
         "type",
         |vars, params, _| {
             expect_params!("type", 1, params.len());
@@ -74,28 +74,26 @@ pub fn init_builtins(
         },
     )));
 
-    functions
-        .borrow_mut()
-        .push(Func::Builtin(BuiltinFunc::new("ref", |vars, params, _| {
-            expect_params!("ref", 1, params.len());
+    functions.push(Func::Builtin(BuiltinFunc::new("ref", |vars, params, _| {
+        expect_params!("ref", 1, params.len());
 
-            match &params[0] {
-                // cloning here because the value is defined within the ref function and cannot be
-                // referenced anywhere else, therefore it is not important to keep the reference
-                // with the original value
-                EvalValue::Value(val) => Some(Value::Ref(Rc::new(RefCell::new(val.clone())))),
-                EvalValue::Token(t) => match t {
-                    Token::Identifier(ident) => {
-                        let val = get_var_ptr(vars, &ident);
-                        let val_ref = val.borrow_mut();
-                        Some(Value::Ref(Rc::clone(&val_ref.value)))
-                    }
-                    _ => panic!("Expected identifier or value to create ref"),
-                },
-            }
-        })));
+        match &params[0] {
+            // cloning here because the value is defined within the ref function and cannot be
+            // referenced anywhere else, therefore it is not important to keep the reference
+            // with the original value
+            EvalValue::Value(val) => Some(Value::Ref(Rc::new(RefCell::new(val.clone())))),
+            EvalValue::Token(t) => match t {
+                Token::Identifier(ident) => {
+                    let val = get_var_ptr(vars, &ident);
+                    let val_ref = val.borrow_mut();
+                    Some(Value::Ref(Rc::clone(&val_ref.value)))
+                }
+                _ => panic!("Expected identifier or value to create ref"),
+            },
+        }
+    })));
 
-    functions.borrow_mut().push(Func::Builtin(BuiltinFunc::new(
+    functions.push(Func::Builtin(BuiltinFunc::new(
         "clone",
         |vars, params, _| {
             let eval_value = params[0].clone();
