@@ -3,8 +3,8 @@ use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 use crate::{
     ast::{Ast, AstNode, FuncParam, StructShape, Value},
     helpers::{
-        cast, compare, compare_types, ensure_type, flatten_exp, get_eval_value, get_prop_ptr,
-        get_ref_value, index_arr_var_value, make_var, push_to_array, set_index_arr, set_var_value,
+        cast, compare, compare_types, flatten_exp, get_eval_value, get_prop_ptr, get_ref_value,
+        index_arr_var_value, make_var, push_to_array, set_index_arr, set_var_value,
         type_from_value, ExpValue,
     },
     tokenizer::{OperatorType, Token},
@@ -101,8 +101,9 @@ impl CustomFunc {
             Some(q) => match q {
                 QuitType::Return(eval_val) => {
                     let val = get_eval_value(vars, eval_val, true);
+                    let val_type = type_from_value(&val);
 
-                    if ensure_type(&self.return_type, &val) {
+                    if compare_types(structs, &self.return_type, &val_type) {
                         return Some(val);
                     } else {
                         panic!(
@@ -157,10 +158,12 @@ pub enum VarType {
     Bool,
     Array(Box<VarType>),
     /// struct type name, shape
-    Struct(String, Rc<RefCell<StructShape>>),
+    Struct(String),
+    StructShape(StructShape),
     Null,
     Ref(Box<VarType>),
     Void,
+    /// param struct shape, return type
     Fn(Box<VarType>, Box<VarType>),
     Union(Vec<VarType>),
 }
@@ -188,11 +191,12 @@ impl VarType {
             VarType::String => "string",
             VarType::Bool => "bool",
             VarType::Array(_) => "arr",
-            VarType::Struct(_, _) => "struct",
+            VarType::Struct(_) => "struct",
             VarType::Null => "null",
             VarType::Void => "void",
             VarType::Fn(_, _) => "fn",
             VarType::Union(_) => "union",
+            VarType::StructShape(_) => "struct shape",
         }
     }
 }
@@ -560,7 +564,9 @@ pub fn eval_node<'a>(
                     let val_type_option = shape_borrow.props.get(prop_name);
                     if let Some(val_type) = val_type_option {
                         let value_type = type_from_value(&value);
-                        if !compare_types(val_type, &value_type) {
+                        let res = !compare_types(structs, val_type, &value_type);
+                        println!("{:?}  @  {:?}\n{}\n", val_type, value_type, res);
+                        if res {
                             panic!(
                                 "Type mismatch in struct creation. Expected {:?} found {:?}",
                                 val_type, value
@@ -749,7 +755,10 @@ pub fn eval_node<'a>(
                 if let (Some(right_res), _) =
                     eval_node(vars, functions, structs, scope, right, stdout)
                 {
-                    return (Some(compare(vars, left_res, right_res, comp_token)), None);
+                    return (
+                        Some(compare(vars, structs, left_res, right_res, comp_token)),
+                        None,
+                    );
                 } else {
                     panic!("Expected result value from left of condition");
                 }
@@ -934,8 +943,9 @@ pub fn eval_node<'a>(
 
                 if let (Some(res), _) = res_option {
                     let val = get_eval_value(vars, res, true);
+                    let val_type = type_from_value(&val);
 
-                    if !ensure_type(arr_type, &val) {
+                    if !compare_types(structs, arr_type, &val_type) {
                         panic!("Wrong type in array, expected {:?}", arr_type);
                     }
 
@@ -1053,7 +1063,7 @@ pub fn eval_node<'a>(
                     panic!("Expected identifier for setting variable");
                 };
 
-                set_var_value(vars, var_name, val);
+                set_var_value(vars, structs, var_name, val);
             }
             (None, None)
         }

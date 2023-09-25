@@ -31,7 +31,8 @@ pub fn make_var<'a>(
             EvalValue::Value(v) => match v {
                 Value::Null => v,
                 _ => {
-                    if ensure_type(&var_type, &v) {
+                    let var_type = type_from_value(&v);
+                    if compare_types(structs, &var_type, &var_type) {
                         v
                     } else {
                         panic!(
@@ -77,8 +78,7 @@ pub fn create_make_var_node<'a>(
     } else {
         if is_struct {
             if let Token::Identifier(ident) = first_token {
-                let shape = structs.available_structs.get(&ident).unwrap();
-                VarType::Struct(ident.clone(), Rc::clone(&shape))
+                VarType::Struct(ident.clone())
             } else {
                 panic!("Expected identifier for variable name");
             }
@@ -270,9 +270,8 @@ pub fn create_keyword_node<'a>(
             let mut shape_tokens = tokens_to_delimiter(tokens, 2, "}");
 
             if let Token::Identifier(ident) = name_option {
-                let temp_shape = Rc::new(RefCell::new(StructShape::new()));
-                structs.add_available_struct(ident.clone(), Rc::clone(&temp_shape));
                 let shape = create_struct_shape(&mut shape_tokens, structs);
+                let temp_shape = structs.available_structs.get_mut(&ident).unwrap();
                 *temp_shape.borrow_mut() = shape;
                 None
             } else {
@@ -348,7 +347,7 @@ fn create_struct_shape<'a>(
                 let mut prop_type = match prop[2].clone().as_ref().unwrap() {
                     Token::Type(t) => t.clone(),
                     Token::Identifier(val) => match structs.available_structs.get(val) {
-                        Some(shape) => VarType::Struct(val.clone(), shape.clone()),
+                        Some(_) => VarType::Struct(val.clone()),
                         None => {
                             let mut clone_tokens: Vec<Option<Token>> =
                                 prop.clone().drain(2..).collect();
@@ -494,6 +493,7 @@ pub fn create_func_call_node<'a>(
 
 pub fn set_var_value<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    structs: &mut StructInfo,
     name: String,
     value: Value,
 ) {
@@ -504,7 +504,7 @@ pub fn set_var_value<'a>(
         let var_value_type = type_from_value(&*(var_value.borrow()));
         match var_value_type {
             VarType::Ref(_) => {
-                if compare_types(&value_ref.var_type, &var_value_type) {
+                if compare_types(structs, &value_ref.var_type, &var_value_type) {
                     if let Value::Ref(ref mut inner_val) = &mut *value_ref.value.borrow_mut() {
                         *inner_val.borrow_mut() = value;
                     }
@@ -517,7 +517,7 @@ pub fn set_var_value<'a>(
                 }
             }
             _ => {
-                if compare_types(&value_ref.var_type, &var_value_type) {
+                if compare_types(structs, &value_ref.var_type, &var_value_type) {
                     *value_ref.value.borrow_mut() = value;
                 } else {
                     panic!(
@@ -767,7 +767,7 @@ pub fn get_type_expression(tokens: &mut Vec<Option<Token>>, structs: &mut Struct
     } else {
         match first_token {
             Token::Identifier(ident) => match structs.available_structs.get(&ident) {
-                Some(v) => VarType::Struct(ident.clone(), v.clone()),
+                Some(_) => VarType::Struct(ident.clone()),
                 None => {
                     let generic_type = get_builtin_generic(&ident, structs, tokens);
                     generic_type.expect("Expected type or struct name for type expression")
@@ -828,7 +828,7 @@ pub fn create_arr<'a>(
     AstNode::Array(node_arr, arr_type)
 }
 
-pub fn compare_types(type1: &VarType, type2: &VarType) -> bool {
+pub fn compare_types(structs: &mut StructInfo, type1: &VarType, type2: &VarType) -> bool {
     match type1 {
         VarType::Int => match type2 {
             VarType::Int => true,
@@ -867,34 +867,68 @@ pub fn compare_types(type1: &VarType, type2: &VarType) -> bool {
             _ => false,
         },
         VarType::Ref(r1) => match type2 {
-            VarType::Ref(r2) => compare_types(r1.as_ref(), r2.as_ref()),
+            VarType::Ref(r2) => compare_types(structs, r1.as_ref(), r2.as_ref()),
             _ => false,
         },
-        VarType::Struct(name1, _) => match type2 {
-            VarType::Struct(name2, _) => name1 == name2,
+        VarType::Struct(name1) => match type2 {
+            VarType::Struct(name2) => name1 == name2,
+            VarType::StructShape(shape1) => {
+                let shape2 = structs.available_structs.get(name1).unwrap();
+                let shape2 = shape2.clone();
+                let shape2 = &*shape2.borrow();
+
+                compare_struct_shapes(structs, shape1, shape2)
+            }
+            _ => false,
+        },
+        VarType::StructShape(shape1) => match type2 {
+            VarType::StructShape(shape2) => compare_struct_shapes(structs, shape1, shape2),
             _ => false,
         },
         VarType::Array(a1) => match type2 {
-            VarType::Array(a2) => compare_types(a1.as_ref(), a2.as_ref()),
+            VarType::Array(a2) => compare_types(structs, a1.as_ref(), a2.as_ref()),
             _ => false,
         },
         VarType::Fn(params1, return1) => match type2 {
             VarType::Fn(params2, return2) => {
-                compare_types(params1.as_ref(), params2.as_ref()) && compare_types(return1, return2)
+                compare_types(structs, params1.as_ref(), params2.as_ref())
+                    && compare_types(structs, return1, return2)
             }
             _ => false,
         },
-        VarType::Union(types) => in_union(types, type2),
+        VarType::Union(types) => in_union(structs, types, type2),
     }
 }
 
-fn in_union(union: &Vec<VarType>, t: &VarType) -> bool {
+fn compare_struct_shapes(
+    structs: &mut StructInfo,
+    shape1: &StructShape,
+    shape2: &StructShape,
+) -> bool {
+    for (name1, type1) in shape1.props.iter() {
+        let mut found = false;
+        for (name2, type2) in shape2.props.iter() {
+            if name1 == name2 {
+                if compare_types(structs, type1, type2) {
+                    found = true;
+                    break;
+                }
+            }
+        }
+        if !found {
+            return false;
+        }
+    }
+    true
+}
+
+fn in_union(structs: &mut StructInfo, union: &Vec<VarType>, t: &VarType) -> bool {
     if let VarType::Union(types) = t {
         'outer: for union_item1 in union.iter() {
             let mut found = false;
 
             for union_item2 in types.iter() {
-                if compare_types(union_item1, union_item2) {
+                if compare_types(structs, union_item1, union_item2) {
                     found = true;
                     break 'outer;
                 }
@@ -909,7 +943,7 @@ fn in_union(union: &Vec<VarType>, t: &VarType) -> bool {
     }
 
     for union_item in union.iter() {
-        if compare_types(union_item, t) {
+        if compare_types(structs, union_item, t) {
             return true;
         }
     }
@@ -917,93 +951,98 @@ fn in_union(union: &Vec<VarType>, t: &VarType) -> bool {
     false
 }
 
-pub fn ensure_type<'a>(var_type: &'a VarType, val: &'a Value) -> bool {
-    match val {
-        Value::Ref(ref_ptr) => match var_type {
-            VarType::Ref(ref_type) => {
-                let ref_value = ref_ptr.borrow();
-                ensure_type(ref_type, &*ref_value)
-            }
-            _ => false,
-        },
-        Value::Null => match var_type {
-            VarType::Null => true,
-            _ => false,
-        },
-        Value::Usize(_) => match var_type {
-            VarType::Usize => true,
-            _ => false,
-        },
-        Value::String(_) => match var_type {
-            VarType::String => true,
-            _ => false,
-        },
-        Value::Int(_) => match var_type {
-            VarType::Int => true,
-            _ => false,
-        },
-        Value::Float(_) => match var_type {
-            VarType::Float => true,
-            _ => false,
-        },
-        Value::Double(_) => match var_type {
-            VarType::Double => true,
-            _ => false,
-        },
-        Value::Long(_) => match var_type {
-            VarType::Long => true,
-            _ => false,
-        },
-        Value::Bool(_) => match var_type {
-            VarType::Bool => true,
-            _ => false,
-        },
-        Value::Fn(func) => match var_type {
-            VarType::Fn(param_type, return_type1) => {
-                let temp = &*func.borrow_mut();
-                let return_type2 = &temp.return_type;
-                if let VarType::Struct(_, shape) = param_type.as_ref() {
-                    let shape_borrow = shape.borrow();
-                    if shape_borrow.props.iter().len() != temp.params.len() {
-                        return false;
-                    }
-                    for param in temp.params.iter() {
-                        let shape_param = shape_borrow.props.get(&param.name);
-                        if let Some(param_type) = shape_param {
-                            if !compare_types(param_type, &param.param_type) {
-                                return false;
-                            }
-                        }
-                    }
-                } else {
-                    return false;
-                }
-                compare_types(return_type1, return_type2)
-            }
-            _ => false,
-        },
-        Value::Array(arr, _) => match var_type {
-            VarType::Array(type_for_arr) => {
-                if arr.len() == 0 {
-                    return true;
-                }
+// pub fn ensure_type<'a>(structs: &mut StructInfo, var_type: &'a VarType, val: &'a Value) -> bool {
+//     match val {
+//         Value::Ref(ref_ptr) => match var_type {
+//             VarType::Ref(ref_type) => {
+//                 let ref_value = ref_ptr.borrow();
+//                 ensure_type(structs, ref_type, &*ref_value)
+//             }
+//             _ => false,
+//         },
+//         Value::Null => match var_type {
+//             VarType::Null => true,
+//             _ => false,
+//         },
+//         Value::Usize(_) => match var_type {
+//             VarType::Usize => true,
+//             _ => false,
+//         },
+//         Value::String(_) => match var_type {
+//             VarType::String => true,
+//             _ => false,
+//         },
+//         Value::Int(_) => match var_type {
+//             VarType::Int => true,
+//             _ => false,
+//         },
+//         Value::Float(_) => match var_type {
+//             VarType::Float => true,
+//             _ => false,
+//         },
+//         Value::Double(_) => match var_type {
+//             VarType::Double => true,
+//             _ => false,
+//         },
+//         Value::Long(_) => match var_type {
+//             VarType::Long => true,
+//             _ => false,
+//         },
+//         Value::Bool(_) => match var_type {
+//             VarType::Bool => true,
+//             _ => false,
+//         },
+//         Value::Fn(func) => match var_type {
+//             VarType::Fn(param_type, return_type1) => {
+//                 let temp = &*func.borrow_mut();
+//                 let return_type2 = &temp.return_type;
+//                 if let VarType::Struct(name) = param_type.as_ref() {
+//                     let shape_option = structs.available_structs.get(name);
+//                     if let Some(shape) = shape_option {
+//                         let shape_borrow = shape.borrow();
+//                         if shape_borrow.props.iter().len() != temp.params.len() {
+//                             return false;
+//                         }
+//                         for param in temp.params.iter() {
+//                             let shape_param = shape_borrow.props.get(&param.name);
+//                             if let Some(param_type) = shape_param {
+//                                 if !compare_types(structs, param_type, &param.param_type) {
+//                                     return false;
+//                                 }
+//                             }
+//                         }
+//                     } else {
+//                         println!("Struct not found: {}", name);
+//                     }
+//                 } else {
+//                     return false;
+//                 }
+//                 compare_types(structs, return_type1, return_type2)
+//             }
+//             _ => false,
+//         },
+//         Value::Array(arr, _) => match var_type {
+//             VarType::Array(type_for_arr) => {
+//                 if arr.len() == 0 {
+//                     return true;
+//                 }
 
-                for item in arr.iter() {
-                    if !ensure_type(type_for_arr.as_ref(), item) {
-                        return false;
-                    }
-                }
+//                 for item in arr.iter() {
+//                     if !ensure_type(structs, type_for_arr.as_ref(), item) {
+//                         return false;
+//                     }
+//                 }
 
-                true
-            }
-            _ => false,
-        },
-        Value::Struct(name1, _, _) => match var_type {
-            VarType::Struct(name2, _) => name1 == name2,
-            _ => false,
-        },
-    }
-}
+//                 true
+//             }
+//             _ => false,
+//         },
+//         Value::Struct(name1, _, _) => match var_type {
+//             VarType::Struct(name2) => name1 == name2,
+//             _ => false,
+//         },
+//     }
+// }
 
 pub fn get_eval_value<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
@@ -1071,7 +1110,8 @@ pub fn push_to_array<'a>(
 
         if let (Some(arg_res), _) = arg_res_option {
             let val = get_eval_value(vars, arg_res, false);
-            if !ensure_type(&arr_type, &val) {
+            let val_type = type_from_value(&val);
+            if !compare_types(structs, &arr_type, &val_type) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
                     arr_type,
@@ -1097,7 +1137,7 @@ pub fn type_from_value(val: &Value) -> VarType {
         Value::Double(_) => VarType::Double,
         Value::Long(_) => VarType::Long,
         Value::Bool(_) => VarType::Bool,
-        Value::Struct(name, shape, _) => VarType::Struct(name.clone(), Rc::clone(&shape)),
+        Value::Struct(name, _, _) => VarType::Struct(name.clone()),
         Value::Array(_, arr_type) => VarType::Array(Box::new(arr_type.clone())),
         Value::Fn(func) => {
             let return_type = func.borrow().return_type.clone();
@@ -1105,8 +1145,7 @@ pub fn type_from_value(val: &Value) -> VarType {
             for param in func.borrow().params.iter() {
                 param_shape.add(param.name.clone(), param.param_type.clone())
             }
-            let param_struct =
-                VarType::Struct(String::from(""), Rc::new(RefCell::new(param_shape)));
+            let param_struct = VarType::StructShape(param_shape);
             VarType::Fn(Box::new(param_struct), Box::new(return_type))
         }
     }
@@ -1156,12 +1195,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("usize", "array"),
-            VarType::Struct(_, _) => cast_panic!("usize", "struct"),
+            VarType::Struct(_) => cast_panic!("usize", "struct"),
             VarType::Null => cast_panic!("usize", "null"),
             VarType::Ref(_) => cast_panic!("usize", "ref"),
             VarType::Void => cast_panic!("usize", "void"),
             VarType::Fn(_, _) => cast_panic!("usize", "fn"),
             VarType::Union(_) => cast_panic!("usize", "union"),
+            VarType::StructShape(_) => unreachable!(),
         },
         Value::String(v) => match to_type {
             VarType::Usize => {
@@ -1178,12 +1218,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::String => Value::String(v),
             VarType::Bool => Value::Bool(v.parse::<bool>().expect("Error parsing string to bool")),
             VarType::Array(_) => cast_panic!("string", "array"),
-            VarType::Struct(_, _) => cast_panic!("string", "struct"),
+            VarType::Struct(_) => cast_panic!("string", "struct"),
             VarType::Null => cast_panic!("string", "null"),
             VarType::Ref(_) => cast_panic!("string", "ref"),
             VarType::Void => cast_panic!("string", "void"),
             VarType::Fn(_, _) => cast_panic!("string", "fn"),
             VarType::Union(_) => cast_panic!("string", "union"),
+            VarType::StructShape(_) => unreachable!(),
         },
         Value::Int(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1202,12 +1243,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("int", "array"),
-            VarType::Struct(_, _) => cast_panic!("int", "struct"),
+            VarType::Struct(_) => cast_panic!("int", "struct"),
             VarType::Null => cast_panic!("int", "null"),
             VarType::Ref(_) => cast_panic!("int", "ref"),
             VarType::Void => cast_panic!("int", "void"),
             VarType::Fn(_, _) => cast_panic!("int", "fn"),
             VarType::Union(_) => cast_panic!("int", "union"),
+            VarType::StructShape(_) => unreachable!(),
         },
         Value::Float(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1226,12 +1268,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("float", "array"),
-            VarType::Struct(_, _) => cast_panic!("float", "struct"),
+            VarType::Struct(_) => cast_panic!("float", "struct"),
             VarType::Null => cast_panic!("float", "null"),
             VarType::Ref(_) => cast_panic!("float", "ref"),
             VarType::Void => cast_panic!("float", "void"),
             VarType::Fn(_, _) => cast_panic!("float", "fn"),
             VarType::Union(_) => cast_panic!("float", "union"),
+            VarType::StructShape(_) => unreachable!(),
         },
         Value::Double(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1250,12 +1293,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("double", "array"),
-            VarType::Struct(_, _) => cast_panic!("double", "struct"),
+            VarType::Struct(_) => cast_panic!("double", "struct"),
             VarType::Null => cast_panic!("double", "null"),
             VarType::Ref(_) => cast_panic!("double", "ref"),
             VarType::Void => cast_panic!("double", "void"),
             VarType::Fn(_, _) => cast_panic!("double", "fn"),
             VarType::Union(_) => cast_panic!("double", "union"),
+            VarType::StructShape(_) => unreachable!(),
         },
         Value::Long(v) => match to_type {
             VarType::Usize => Value::Usize(v as usize),
@@ -1274,12 +1318,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("long", "array"),
-            VarType::Struct(_, _) => cast_panic!("long", "struct"),
+            VarType::Struct(_) => cast_panic!("long", "struct"),
             VarType::Null => cast_panic!("long", "null"),
             VarType::Ref(_) => cast_panic!("long", "ref"),
             VarType::Void => cast_panic!("long", "void"),
             VarType::Fn(_, _) => cast_panic!("long", "fn"),
             VarType::Union(_) => cast_panic!("long", "union"),
+            VarType::StructShape(_) => unreachable!(),
         },
         Value::Bool(v) => {
             let num_val = if v { 1 } else { 0 };
@@ -1292,12 +1337,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 VarType::String => Value::String(v.to_string()),
                 VarType::Bool => val,
                 VarType::Array(_) => cast_panic!("bool", "array"),
-                VarType::Struct(_, _) => cast_panic!("bool", "struct"),
+                VarType::Struct(_) => cast_panic!("bool", "struct"),
                 VarType::Null => cast_panic!("bool", "null"),
                 VarType::Ref(_) => cast_panic!("bool", "ref"),
                 VarType::Void => cast_panic!("bool", "void"),
                 VarType::Fn(_, _) => cast_panic!("bool", "fn"),
                 VarType::Union(_) => cast_panic!("bool", "union"),
+                VarType::StructShape(_) => unreachable!(),
             }
         }
         Value::Array(arr, _) => match to_type {
@@ -1309,12 +1355,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::String => Value::String(get_value_arr_str(&arr)),
             VarType::Bool => cast_panic!("array", "bool"),
             VarType::Array(_) => unimplemented!(),
-            VarType::Struct(_, _) => cast_panic!("array", "struct"),
+            VarType::Struct(_) => cast_panic!("array", "struct"),
             VarType::Null => cast_panic!("array", "null"),
             VarType::Ref(_) => cast_panic!("array", "ref"),
             VarType::Void => cast_panic!("array", "void"),
             VarType::Fn(_, _) => cast_panic!("array", "fn"),
             VarType::Union(_) => cast_panic!("array", "union"),
+            VarType::StructShape(_) => unreachable!(),
         },
         Value::Struct(_, _, _) => panic!("Cannot cast structs"),
     }
@@ -1503,7 +1550,7 @@ pub fn create_comp_node<'a>(
 }
 
 macro_rules! comp {
-    ($left:expr, $right:expr, ==, $($variants:ident),*) => {
+    ($structs:expr, $left:expr, $right:expr, ==, $($variants:ident),*) => {
         {
             match $left {
                 $(
@@ -1514,7 +1561,7 @@ macro_rules! comp {
                     }
                 )*
                 Value::Array(left_arr, left_type) => match $right {
-                    Value::Array(right_arr, _) => Ok(compare_array(left_arr, right_arr, left_type, $right)),
+                    Value::Array(right_arr, right_type) => Ok(compare_array($structs, left_arr, right_arr, left_type, right_type)),
                     _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
                 }
                 Value::Struct(left_name, _, props_left) => match $right {
@@ -1522,7 +1569,7 @@ macro_rules! comp {
                         Ok(if left_name == right_name {
                             false
                         } else {
-                            compare_struct_values(props_left, props_right)
+                            compare_struct_values($structs, props_left, props_right)
                         })
                     },
                     _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
@@ -1536,7 +1583,7 @@ macro_rules! comp {
             }
         }
     };
-    ($left:expr, $right:expr, $c:tt, $($variants:ident),*) => {
+    ($structs:expr, $left:expr, $right:expr, $c:tt, $($variants:ident),*) => {
         {
             match $left {
                 $(
@@ -1556,19 +1603,41 @@ macro_rules! comp {
     };
 }
 
+macro_rules! comp_bind {
+    ($structs:expr, $left:expr, $right:expr, $tok:tt) => {
+        comp!($structs, $left, $right, $tok, Usize, String, Int, Float, Double, Long, Bool)
+    };
+}
+
+macro_rules! comp_match {
+    ($structs:expr, $tok:ident, $left:expr, $right:expr) => {
+        match $tok {
+            Token::EqCompare => comp_bind!($structs, $left, $right, ==),
+            Token::EqNCompare => comp_bind!($structs, $left, $right, !=),
+            Token::LAngle => comp_bind!($structs, $left, $right, <),
+            Token::RAngle => comp_bind!($structs, $left, $right, >),
+            Token::LAngleEq => comp_bind!($structs, $left, $right, <=),
+            Token::RAngleEq => comp_bind!($structs, $left, $right, >=),
+            _ => panic!("Expected comparison operator"),
+        }
+    }
+}
+
 fn compare_array(
+    structs: &mut StructInfo,
     left: &Vec<Value>,
     right: &Vec<Value>,
     left_type: &VarType,
-    right_val: &Value,
+    right_type: &VarType,
 ) -> bool {
-    if !ensure_type(left_type, right_val) {
+    if !compare_types(structs, left_type, right_type) {
         if left.len() != right.len() {
             return false;
         }
 
         for i in 0..left.len() {
-            if match comp!(&left[i], &right[i], ==, Usize, String, Int, Float, Double, Long, Bool) {
+            if match comp!(structs, &left[i], &right[i], ==, Usize, String, Int, Float, Double, Long, Bool)
+            {
                 Ok(val) => !val,
                 Err(msg) => {
                     println!("{}", msg);
@@ -1585,27 +1654,11 @@ fn compare_array(
     }
 }
 
-macro_rules! comp_bind {
-    ($left:expr, $right:expr, $tok:tt) => {
-        comp!($left, $right, $tok, Usize, String, Int, Float, Double, Long, Bool)
-    };
-}
-
-macro_rules! comp_match {
-    ($tok:ident, $left:expr, $right:expr) => {
-        match $tok {
-            Token::EqCompare => comp_bind!($left, $right, ==),
-            Token::EqNCompare => comp_bind!($left, $right, !=),
-            Token::LAngle => comp_bind!($left, $right, <),
-            Token::RAngle => comp_bind!($left, $right, >),
-            Token::LAngleEq => comp_bind!($left, $right, <=),
-            Token::RAngleEq => comp_bind!($left, $right, >=),
-            _ => panic!("Expected comparison operator"),
-        }
-    }
-}
-
-fn compare_struct_values(left: &Vec<StructProp>, right: &Vec<StructProp>) -> bool {
+fn compare_struct_values(
+    structs: &mut StructInfo,
+    left: &Vec<StructProp>,
+    right: &Vec<StructProp>,
+) -> bool {
     for left_val in left.iter() {
         let mut found = false;
 
@@ -1613,7 +1666,7 @@ fn compare_struct_values(left: &Vec<StructProp>, right: &Vec<StructProp>) -> boo
             if left_val.name == right_val.name {
                 let left = left_val.value.borrow().clone();
                 let right = left_val.value.borrow().clone();
-                if match comp_bind!(&left, &right, ==) {
+                if match comp_bind!(structs, &left, &right, ==) {
                     Ok(val) => val,
                     Err(_) => false,
                 } {
@@ -1632,6 +1685,7 @@ fn compare_struct_values(left: &Vec<StructProp>, right: &Vec<StructProp>) -> boo
 
 pub fn compare<'a>(
     vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    structs: &mut StructInfo,
     left: EvalValue,
     right: EvalValue,
     comp_token: &Token,
@@ -1639,18 +1693,18 @@ pub fn compare<'a>(
     let res = match left {
         EvalValue::Value(left_val) => match right {
             EvalValue::Value(right_val) => {
-                comp_match!(comp_token, &left_val, &right_val)
+                comp_match!(structs, comp_token, &left_val, &right_val)
             }
             EvalValue::Token(t) => match t {
                 Token::Identifier(ident) => {
                     let var_ptr = get_var_ptr(vars, &ident);
                     let var_ref = var_ptr.borrow();
                     let right_val = &*var_ref.value.borrow();
-                    comp_match!(comp_token, &left_val, right_val)
+                    comp_match!(structs, comp_token, &left_val, right_val)
                 }
                 _ => {
                     let right_val = value_from_token(&t, None);
-                    comp_match!(comp_token, &left_val, &right_val)
+                    comp_match!(structs, comp_token, &left_val, &right_val)
                 }
             },
         },
@@ -1661,18 +1715,18 @@ pub fn compare<'a>(
                 let left_val = &*var_ref.value.borrow();
                 match right {
                     EvalValue::Value(right_val) => {
-                        comp_match!(comp_token, left_val, &right_val)
+                        comp_match!(structs, comp_token, left_val, &right_val)
                     }
                     EvalValue::Token(t) => match t {
                         Token::Identifier(ident) => {
                             let var_ptr = get_var_ptr(vars, &ident);
                             let var_ref = var_ptr.borrow();
                             let right_val = &*var_ref.value.borrow();
-                            comp_match!(comp_token, &left_val, right_val)
+                            comp_match!(structs, comp_token, &left_val, right_val)
                         }
                         _ => {
                             let right_val = value_from_token(&t, None);
-                            comp_match!(comp_token, left_val, &right_val)
+                            comp_match!(structs, comp_token, left_val, &right_val)
                         }
                     },
                 }
@@ -1682,18 +1736,18 @@ pub fn compare<'a>(
 
                 match right {
                     EvalValue::Value(right_val) => {
-                        comp_match!(comp_token, &left_val, &right_val)
+                        comp_match!(structs, comp_token, &left_val, &right_val)
                     }
                     EvalValue::Token(t) => match t {
                         Token::Identifier(ident) => {
                             let var_ptr = get_var_ptr(vars, &ident);
                             let var_ref = var_ptr.borrow();
                             let right_val = &*var_ref.value.borrow();
-                            comp_match!(comp_token, &left_val, right_val)
+                            comp_match!(structs, comp_token, &left_val, right_val)
                         }
                         _ => {
                             let right_val = value_from_token(&t, None);
-                            comp_match!(comp_token, &left_val, &right_val)
+                            comp_match!(structs, comp_token, &left_val, &right_val)
                         }
                     },
                 }
@@ -1832,7 +1886,7 @@ fn get_builtin_generic(
                 Token::Identifier(ident) => {
                     let struct_info = structs.available_structs.get(ident.as_str());
                     if let Some(struct_shape) = struct_info {
-                        VarType::Struct(ident.clone(), struct_shape.clone())
+                        VarType::Struct(ident.clone())
                     } else {
                         panic!("Unexpected type {}", ident);
                     }
@@ -1859,7 +1913,7 @@ fn get_builtin_generic(
             let param_type = if let Token::Identifier(ident) = param_tokens[0].as_ref().unwrap() {
                 let struct_info = structs.available_structs.get(ident.as_str());
                 if let Some(struct_shape) = struct_info {
-                    VarType::Struct(ident.clone(), struct_shape.clone())
+                    VarType::Struct(ident.clone())
                 } else {
                     panic!("Unexpected type {}", ident);
                 }
