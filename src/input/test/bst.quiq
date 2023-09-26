@@ -1,5 +1,3 @@
-// recursive types overflow call stack
-
 struct BstNode {
   left: union<ref<BstNode>, null>;
   right: union<ref<BstNode>, null>;
@@ -13,16 +11,19 @@ struct BstAddParams {
 struct Bst {
   root: union<BstNode, null>;
   add: fn<BstAddParams, void>;
+  val: int;
 }
 
 func createBst() Bst {
   return <Bst>{
     root: null,
+    val: 1,
     add: func (ref<Bst> self) void {
-      print(self);
+      self.val = 2;
     }
   }
 }
 
 Bst a = createBst();
+a.add();
 print(a);

@@ -71,12 +71,38 @@ impl CustomFunc {
         scope: usize,
         stdout: &mut Stdout,
         args: &Vec<AstNode>,
+        current_struct: Option<Rc<RefCell<Value>>>,
     ) -> Option<Value> {
-        if args.len() != self.params.len() {
-            panic!("Wrong number of arguments to func \"{}\"", self.name);
+        if args.len() != self.params.len()
+            && (args.len() != self.params.len() - 1 && self.params[0].name != "self")
+        {
+            let func_name = if self.name.len() == 0 {
+                "anonymous function"
+            } else {
+                self.name.as_str()
+            };
+            panic!("Wrong number of arguments to func \"{}\"", func_name);
         }
 
-        for (i, param) in self.params.iter().enumerate() {
+        let mut i = 0;
+
+        if let Some(current_struct) = current_struct {
+            let var_value = VarValue::new(
+                self.params[0].name.clone(),
+                Value::Ref(Rc::clone(&current_struct)),
+                self.params[0].param_type.clone(),
+                scope,
+            );
+            vars.insert(
+                self.params[0].name.clone(),
+                Rc::new(RefCell::new(var_value)),
+            );
+
+            i += 1;
+        }
+
+        while i < self.params.len() {
+            let param = &self.params[i];
             make_var(
                 vars,
                 functions,
@@ -88,6 +114,18 @@ impl CustomFunc {
                 stdout,
             )
         }
+        // for (i, param) in self.params.iter().enumerate() {
+        //     make_var(
+        //         vars,
+        //         functions,
+        //         structs,
+        //         scope,
+        //         &param.param_type,
+        //         &Token::Identifier(param.name.clone()),
+        //         &Some(Box::new(args[i].clone())),
+        //         stdout,
+        //     )
+        // }
 
         let (_, quit) = eval_node(vars, functions, structs, scope + 1, &self.block, stdout);
 
@@ -308,9 +346,15 @@ fn call_func<'a>(
         match func {
             Func::Custom(custom) => {
                 if &custom.borrow().name == name {
-                    return custom
-                        .borrow()
-                        .call(vars, functions, structs, scope + 1, stdout, args);
+                    return custom.borrow().call(
+                        vars,
+                        functions,
+                        structs,
+                        scope + 1,
+                        stdout,
+                        args,
+                        None,
+                    );
                 }
             }
             Func::Builtin(builtin) => {
@@ -341,7 +385,7 @@ fn call_func<'a>(
 
         if let Value::Fn(f) = val {
             let f = &*f.borrow();
-            return f.call(vars, functions, structs, scope, stdout, args);
+            return f.call(vars, functions, structs, scope, stdout, args, None);
         } else {
             panic!("Unknown function: {}", name);
         }
@@ -790,6 +834,8 @@ pub fn eval_node<'a>(
             let mut i = 0;
             while i < access_path.len() {
                 let mut temp_value: Option<Rc<RefCell<Value>>> = None;
+                let mut prop_func: Option<CustomFunc> = None;
+                let mut prop_args: Option<&Vec<AstNode>> = None;
 
                 match &mut *value.borrow_mut() {
                     Value::Array(ref mut vals, arr_type) => {
@@ -819,8 +865,8 @@ pub fn eval_node<'a>(
                     }
                     Value::Struct(_, _, ref mut props) => {
                         if i < access_path.len() {
-                            let path_item = access_path.get(i).unwrap();
-                            match path_item {
+                            let mut path_item = access_path.get(i).unwrap();
+                            match &mut path_item {
                                 AstNode::Token(tok) => match tok {
                                     Token::Identifier(ident) => {
                                         temp_value = Some(get_prop_ptr(props, ident).unwrap());
@@ -905,12 +951,8 @@ pub fn eval_node<'a>(
                                     if let Some(prop_val) = prop {
                                         if let Value::Fn(func) = &*prop_val.borrow() {
                                             let func = &*func.borrow();
-                                            let res = func.call(
-                                                vars, functions, structs, scope, stdout, args,
-                                            );
-                                            if let Some(res_val) = res {
-                                                return (Some(EvalValue::Value(res_val)), None);
-                                            }
+                                            prop_func = Some(func.clone());
+                                            prop_args = Some(args);
                                         }
                                     } else {
                                         panic!("Undefined property {}", name);
@@ -924,6 +966,21 @@ pub fn eval_node<'a>(
                     }
                     _ => unimplemented!(),
                 };
+
+                if let Some(func) = prop_func {
+                    let res = func.call(
+                        vars,
+                        functions,
+                        structs,
+                        scope,
+                        stdout,
+                        prop_args.unwrap(),
+                        Some(Rc::clone(&value)),
+                    );
+                    if let Some(res_val) = res {
+                        return (Some(EvalValue::Value(res_val)), None);
+                    }
+                }
 
                 if let Some(val) = temp_value {
                     value = val;
