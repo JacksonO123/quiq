@@ -565,7 +565,6 @@ pub fn eval_node<'a>(
                     if let Some(val_type) = val_type_option {
                         let value_type = type_from_value(&value);
                         let res = !compare_types(structs, val_type, &value_type);
-                        println!("{:?}  @  {:?}\n{}\n", val_type, value_type, res);
                         if res {
                             panic!(
                                 "Type mismatch in struct creation. Expected {:?} found {:?}",
