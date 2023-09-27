@@ -42,5 +42,5 @@ arrRef.push(<Inner>{
   lifetime: 1000
 });
 
-print(arrRef.length);
-print(str);
+println(arrRef.length);
+println(str);

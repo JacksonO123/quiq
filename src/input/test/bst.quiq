@@ -69,5 +69,5 @@ for (i; 0; 728) {
 // a.add(3);
 // a.add(5);
 
-print(a);
+println(a);
 free(a);
