@@ -5,20 +5,17 @@ mod interpreter;
 mod tokenizer;
 mod variables;
 
-use std::cell::RefCell;
-use std::collections::HashMap;
+use std::env::args;
 use std::io;
-use std::path::Path;
-use std::rc::Rc;
 use std::time::Instant;
-use std::{env::args, fs};
 
+use helpers::get_file;
 use interpreter::StructInfo;
 use variables::Variables;
 
 use crate::ast::generate_tree;
 use crate::builtins::init_builtins;
-use crate::interpreter::{eval, VarValue};
+use crate::interpreter::eval;
 use crate::tokenizer::tokenize;
 
 fn main() {
@@ -33,7 +30,7 @@ fn main() {
     };
 
     let file_start = Instant::now();
-    let file = get_file(filename);
+    let file = get_file(format!("src/input/{}", filename).as_str());
     let file_end = file_start.elapsed();
 
     let mut struct_info = StructInfo::new();
@@ -104,10 +101,4 @@ fn main() {
             end.as_nanos()
         );
     }
-}
-
-fn get_file(name: &str) -> String {
-    let path_str = "src/input/".to_owned() + name;
-    let path = Path::new(&path_str);
-    fs::read_to_string(path).unwrap()
 }

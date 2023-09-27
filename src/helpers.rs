@@ -1,4 +1,11 @@
-use std::{cell::RefCell, io::Stdout, process::exit, rc::Rc};
+use std::{
+    cell::RefCell,
+    fs::{self, File},
+    io::{self, Stdout, Write},
+    path::Path,
+    process::exit,
+    rc::Rc,
+};
 
 use crate::{
     ast::{get_ast_node, get_value_arr_str, AstNode, FuncParam, StructShape, Value},
@@ -11,7 +18,6 @@ use crate::{
 };
 
 pub fn make_var<'a>(
-    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     vars: &mut Variables,
     functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
@@ -555,7 +561,7 @@ pub fn tokens_to_delimiter<'a>(
     delimiter: &'a str,
 ) -> Vec<Option<Token>> {
     let mut res = vec![];
-    let mut has_unclosed_langle = false;
+    let mut has_unclosed_left_angle = false;
 
     let mut open_brackets = 0;
     let mut i = start;
@@ -568,7 +574,7 @@ pub fn tokens_to_delimiter<'a>(
                 Token::LBrace => true,
                 Token::LBracket => true,
                 Token::LAngle => {
-                    has_unclosed_langle = true;
+                    has_unclosed_left_angle = true;
                     true
                 }
                 _ => false,
@@ -579,14 +585,14 @@ pub fn tokens_to_delimiter<'a>(
                 Token::RBrace => true,
                 Token::RBracket => true,
                 Token::RAngle => {
-                    has_unclosed_langle = false;
+                    has_unclosed_left_angle = false;
                     true
                 }
                 _ => false,
             } {
                 open_brackets -= 1;
-                if has_unclosed_langle {
-                    has_unclosed_langle = false;
+                if has_unclosed_left_angle {
+                    has_unclosed_left_angle = false;
                     continue;
                 }
             }
@@ -727,7 +733,6 @@ pub enum ExpValue {
 }
 
 pub fn flatten_exp<'a>(
-    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     vars: &mut Variables,
     functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
@@ -942,18 +947,13 @@ fn compare_struct_shapes(
 fn in_union(structs: &mut StructInfo, union: &Vec<VarType>, t: &VarType) -> bool {
     if let VarType::Union(types) = t {
         'outer: for union_item1 in union.iter() {
-            let mut found = false;
-
             for union_item2 in types.iter() {
                 if compare_types(structs, union_item1, union_item2) {
-                    found = true;
                     break 'outer;
                 }
             }
 
-            if !found {
-                return false;
-            }
+            return false;
         }
 
         return true;
@@ -968,8 +968,7 @@ fn in_union(structs: &mut StructInfo, union: &Vec<VarType>, t: &VarType) -> bool
     false
 }
 
-pub fn get_eval_value<'a>(
-    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+pub fn get_eval_value(
     vars: &mut Variables,
     val: EvalValue,
     scope: usize,
@@ -1927,4 +1926,24 @@ pub fn get_ref_value(val: &Rc<RefCell<Value>>) -> Rc<RefCell<Value>> {
     } else {
         Rc::clone(val)
     }
+}
+
+pub fn input(prompt: &str) -> String {
+    println!("{}", prompt);
+    let mut buf = String::new();
+    io::stdin()
+        .read_line(&mut buf)
+        .expect("Error getting user input");
+    buf.trim().to_string()
+}
+
+pub fn write_file(destination: &str, content: &str) -> Result<(), io::Error> {
+    let mut file = File::create(destination)?;
+    write!(file, "{}", content)?;
+    Ok(())
+}
+
+pub fn get_file(name: &str) -> String {
+    let path = Path::new(name);
+    fs::read_to_string(path).unwrap()
 }

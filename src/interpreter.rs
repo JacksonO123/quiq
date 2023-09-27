@@ -153,24 +153,12 @@ impl CustomFunc {
 
 pub struct BuiltinFunc<'a> {
     name: &'a str,
-    func: fn(
-        // &mut HashMap<String, Rc<RefCell<VarValue>>>,
-        &mut Variables,
-        Vec<EvalValue>,
-        usize,
-        &mut Stdout,
-    ) -> Option<Value>,
+    func: fn(&mut Variables, Vec<Option<EvalValue>>, usize, &mut Stdout) -> Option<Value>,
 }
 impl<'a> BuiltinFunc<'a> {
     pub fn new(
         name: &'a str,
-        func: fn(
-            // &mut HashMap<String, Rc<RefCell<VarValue>>>,
-            &mut Variables,
-            Vec<EvalValue>,
-            usize,
-            &mut Stdout,
-        ) -> Option<Value>,
+        func: fn(&mut Variables, Vec<Option<EvalValue>>, usize, &mut Stdout) -> Option<Value>,
     ) -> Self {
         Self { name, func }
     }
@@ -254,12 +242,7 @@ impl VarValue {
     }
 }
 
-pub fn get_var_ptr<'a>(
-    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
-    vars: &mut Variables,
-    name: &String,
-    scope: usize,
-) -> Rc<RefCell<VarValue>> {
+pub fn get_var_ptr<'a>(vars: &mut Variables, name: &String, scope: usize) -> Rc<RefCell<VarValue>> {
     let res_option = vars.get(name, scope);
     if let Some(res) = res_option {
         Rc::clone(&res)
@@ -363,12 +346,12 @@ fn call_func<'a>(
                     let args = args.iter().map(|arg| {
                         let res = eval_node(vars, functions, structs, scope, arg, stdout);
                         if let (Some(val), _) = res {
-                            val
+                            Some(val)
                         } else {
                             panic!("Cannot pass void type as parameter to function")
                         }
                     });
-                    let args: Vec<EvalValue> = args.collect();
+                    let args: Vec<Option<EvalValue>> = args.collect();
 
                     return f(vars, args, scope, stdout);
                 }
@@ -521,6 +504,7 @@ macro_rules! for_loop {
         let var_value = VarValue::new($name, Value::$variant(current), VarType::$variant, $scope);
         $vars.insert_ptr($name.clone(), Rc::new(RefCell::new(var_value)));
 
+        #[allow(unused_comparisons)]
         if inc >= 0 {
             while current < to_num {
                 let (_, quit) = eval_node(
@@ -580,7 +564,6 @@ pub enum QuitType {
 /// return type is single value
 /// Ex: AstNode::Token(bool) -> Token(bool)
 pub fn eval_node<'a>(
-    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     vars: &mut Variables,
     functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,

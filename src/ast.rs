@@ -470,7 +470,7 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
     AstNode::StatementSeq(seq)
 }
 
-pub fn generate_tree<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Ast {
+pub fn generate_tree(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Ast {
     let mut tree = Ast::new();
 
     let node_option = get_ast_node(structs, tokens);
