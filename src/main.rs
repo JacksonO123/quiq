@@ -46,7 +46,6 @@ fn main() {
     let tree = generate_tree(&mut struct_info, &mut tokens);
     let tree_end = tree_start.elapsed();
 
-    // let mut vars: HashMap<String, Rc<RefCell<VarValue>>> = HashMap::new();
     let mut vars = Variables::new();
     let mut functions = vec![];
 

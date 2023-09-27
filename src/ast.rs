@@ -435,7 +435,6 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
             continue;
         }
 
-        let mut offset = 0;
         if i > 0 {
             if match tokens[i - 1].as_ref().unwrap() {
                 Token::Keyword(Keyword::If) => true,
@@ -444,10 +443,10 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
                 Token::Identifier(_) => true,
                 _ => false,
             } {
-                offset += 1;
+                i -= 1;
             }
         }
-        let mut token_slice = get_sequence_slice(tokens, i - offset);
+        let mut token_slice = get_sequence_slice(tokens, i);
         let token_num = token_slice.len();
 
         let node_option = get_ast_node(structs, &mut token_slice);
@@ -465,7 +464,7 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
                 seq.push(ptr);
             }
         }
-        i += token_num + 1 + offset;
+        i += token_num + 1;
     }
 
     AstNode::StatementSeq(seq)

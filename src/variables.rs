@@ -37,9 +37,47 @@ impl Variables {
                 }
             }
 
-            Some(Rc::clone(&var_arr[max_scope_index]))
+            if max_scope_index < var_arr.len() {
+                Some(Rc::clone(&var_arr[max_scope_index]))
+            } else {
+                None
+            }
         } else {
             None
         }
+    }
+    pub fn free(&mut self, name: &String, scope: usize) {
+        let var_arr = self.vars.get_mut(name);
+
+        let mut max_scope = 0;
+        let mut max_scope_index = 0;
+        let mut found = false;
+
+        if let Some(var_arr) = var_arr {
+            let mut i = 0;
+
+            while i < var_arr.len() {
+                if var_arr[i].borrow().scope == scope {
+                    var_arr.remove(i);
+                    if i > 0 {
+                        i -= 1;
+                    }
+                    found = true;
+                } else if var_arr[i].borrow().scope > max_scope && var_arr[i].borrow().scope < scope
+                {
+                    max_scope = var_arr[i].borrow().scope;
+                    max_scope_index = i;
+                }
+
+                i += 1;
+            }
+
+            if !found {
+                var_arr.remove(max_scope_index);
+            }
+        }
+    }
+    pub fn print(&self) {
+        println!("{:#?}", self.vars);
     }
 }

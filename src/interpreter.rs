@@ -92,7 +92,7 @@ impl CustomFunc {
                 self.params[0].name.clone(),
                 Value::Ref(Rc::clone(&current_struct)),
                 self.params[0].param_type.clone(),
-                scope + 1,
+                scope,
             );
             vars.insert(self.params[0].name.clone(), var_value);
 
@@ -106,7 +106,7 @@ impl CustomFunc {
                 vars,
                 functions,
                 structs,
-                scope + 1,
+                scope,
                 &param.param_type,
                 &Token::Identifier(param.name.clone()),
                 &Some(Box::new(args[i].clone())),
@@ -115,7 +115,7 @@ impl CustomFunc {
             i += 1;
         }
 
-        let (_, quit) = eval_node(vars, functions, structs, scope + 1, &self.block, stdout);
+        let (_, quit) = eval_node(vars, functions, structs, scope, &self.block, stdout);
 
         if let VarType::Void = self.return_type {
             if quit.is_some() {
@@ -123,14 +123,14 @@ impl CustomFunc {
             }
         }
 
-        match quit {
+        let res = match quit {
             Some(q) => match q {
                 QuitType::Return(eval_val) => {
                     let val = get_eval_value(vars, eval_val, scope, true);
                     let val_type = type_from_value(&val);
 
                     if compare_types(structs, &self.return_type, &val_type) {
-                        return Some(val);
+                        Some(val)
                     } else {
                         panic!(
                             "Expected return type {:?} found {:?}",
@@ -138,12 +138,16 @@ impl CustomFunc {
                         );
                     }
                 }
-                _ => {}
+                _ => None,
             },
-            None => {}
+            None => None,
+        };
+
+        for param in self.params.iter() {
+            vars.free(&param.name, scope);
         }
 
-        None
+        res
     }
 }
 
@@ -380,7 +384,7 @@ fn call_func<'a>(
 
         if let Value::Fn(f) = val {
             let f = &*f.borrow();
-            return f.call(vars, functions, structs, scope, stdout, args, None);
+            return f.call(vars, functions, structs, scope + 1, stdout, args, None);
         } else {
             panic!("Unknown function: {}", name);
         }
@@ -987,7 +991,7 @@ pub fn eval_node<'a>(
                     };
 
                     if let Some(val) = temp_value {
-                        value = val;
+                        value = get_ref_value(&val);
                     }
 
                     i += 1;
@@ -1001,7 +1005,7 @@ pub fn eval_node<'a>(
                     vars,
                     functions,
                     structs,
-                    scope,
+                    scope + 1,
                     stdout,
                     args_for_func.unwrap(),
                     Some(Rc::clone(&current_struct.unwrap())),
@@ -1203,7 +1207,6 @@ pub fn eval_node<'a>(
 }
 
 pub fn eval<'a>(
-    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
     vars: &mut Variables,
     functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,

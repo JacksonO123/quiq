@@ -7,15 +7,13 @@ use crate::{
     tokenizer::Token,
 };
 
-macro_rules! expect_params {
-    ($name:expr, $expected:expr, $found:expr) => {
-        if $expected != $found {
-            panic!(
-                "Expected {} params in function `{}`, found {}",
-                $expected, $name, $found
-            );
-        }
-    };
+fn expect_params(name: &str, expected: usize, found: usize) {
+    if expected != found {
+        panic!(
+            "Expected {} params in function `{}`, found {}",
+            expected, name, found
+        );
+    }
 }
 
 pub fn init_builtins(functions: &mut Vec<Func>) {
@@ -52,7 +50,7 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
     functions.push(Func::Builtin(BuiltinFunc::new(
         "type",
         |vars, params, scope, _| {
-            expect_params!("type", 1, params.len());
+            expect_params("type", 1, params.len());
 
             let res = match params[0].to_owned() {
                 EvalValue::Token(t) => match t {
@@ -74,7 +72,7 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
     functions.push(Func::Builtin(BuiltinFunc::new(
         "ref",
         |vars, params, scope, _| {
-            expect_params!("ref", 1, params.len());
+            expect_params("ref", 1, params.len());
 
             match &params[0] {
                 // cloning here because the value is defined within the ref function and cannot be
@@ -103,5 +101,37 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
                 _ => to_clone,
             })
         },
-    )))
+    )));
+
+    functions.push(Func::Builtin(BuiltinFunc::new(
+        "free",
+        |vars, params, scope, _| {
+            for param in params.iter() {
+                match param {
+                    EvalValue::Value(_) => panic!("Expected variable identifier to free"),
+                    EvalValue::Token(t) => {
+                        if let Token::Identifier(ident) = t {
+                            vars.free(ident, scope);
+                        } else {
+                            panic!("Expected variable identifier to free");
+                        }
+                    }
+                }
+            }
+            None
+        },
+    )));
+
+    functions.push(Func::Builtin(BuiltinFunc::new(
+        "scope",
+        |_, _, scope, _| {
+            println!("{}", scope);
+            None
+        },
+    )));
+
+    functions.push(Func::Builtin(BuiltinFunc::new("vdump", |vars, _, _, _| {
+        vars.print();
+        None
+    })));
 }

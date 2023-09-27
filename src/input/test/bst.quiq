@@ -27,8 +27,19 @@ func createBstNode(int val) BstNode {
     right: null,
     value: val,
     add: func (ref<BstNode> self, int val) void {
-      print(self.value);
-      print("adding in node");
+      if (val < clone(self.value)) {
+        if (self.left == null) {
+          self.left = ref(createBstNode(val));
+        } else {
+          self.left.add(val);
+        }
+      } else {
+        if (self.right == null) {
+          self.right = ref(createBstNode(val));
+        } else {
+          self.right.add(val);
+        }
+      }
     }
   }
 }
@@ -49,5 +60,8 @@ func createBst() Bst {
 
 Bst a = createBst();
 a.add(2);
+a.add(4);
 a.add(3);
+a.add(5);
 print(a);
+free(a);
