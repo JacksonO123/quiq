@@ -11,6 +11,7 @@ pub enum OperatorType {
     Sub,
     Mult,
     Div,
+    Mod,
 }
 impl OperatorType {
     pub fn get_str(&self) -> &str {
@@ -19,6 +20,7 @@ impl OperatorType {
             OperatorType::Sub => "-",
             OperatorType::Mult => "*",
             OperatorType::Div => "/",
+            OperatorType::Mod => "%",
         }
     }
 }
@@ -277,6 +279,8 @@ pub fn tokenize(code: &str, structs: &mut StructInfo) -> Vec<Option<Token>> {
             token = Token::Operator(OperatorType::Add);
         } else if chars[i] == '-' {
             token = Token::Operator(OperatorType::Sub);
+        } else if chars[i] == '%' {
+            token = Token::Operator(OperatorType::Mod);
         } else if chars[i] == '(' {
             token = Token::LParen;
         } else if chars[i] == ')' {

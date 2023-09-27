@@ -1,10 +1,15 @@
-use std::{cell::RefCell, io::Write, rc::Rc};
+use std::{
+    cell::RefCell,
+    io::{Stdout, Write},
+    rc::Rc,
+};
 
 use crate::{
     ast::Value,
     helpers::{get_eval_value, get_file, get_ref_value, input, write_file},
     interpreter::{get_var_ptr, value_from_token, BuiltinFunc, EvalValue, Func},
     tokenizer::Token,
+    variables::Variables,
 };
 
 fn expect_params(name: &str, expected: usize, found: usize) {
@@ -16,33 +21,51 @@ fn expect_params(name: &str, expected: usize, found: usize) {
     }
 }
 
+fn print_abstracted(
+    vars: &mut Variables,
+    mut params: Vec<Option<EvalValue>>,
+    scope: usize,
+    stdout: &mut Stdout,
+) {
+    for i in 0..params.len() {
+        let param = params[i].take().unwrap();
+        let to_print = match param {
+            EvalValue::Value(val) => val.get_str(),
+            EvalValue::Token(tok) => match tok {
+                Token::Identifier(ident) => {
+                    let var_ptr = get_var_ptr(vars, &ident, scope);
+                    let var_borrow = var_ptr.borrow();
+                    let var_value = &*var_borrow.value.borrow();
+                    var_value.get_str()
+                }
+                _ => value_from_token(&tok, None).get_str(),
+            },
+        };
+
+        let to_print = to_print.as_str();
+        let bytes = to_print.as_bytes();
+
+        stdout.write_all(bytes).unwrap();
+        if i < &params.len() - 1 {
+            stdout.write_all(b" ").unwrap();
+        }
+    }
+}
+
 pub fn init_builtins(functions: &mut Vec<Func>) {
     functions.push(Func::Builtin(BuiltinFunc::new(
         "print",
-        |vars, mut params, scope, stdout| {
-            for i in 0..params.len() {
-                let param = params[i].take().unwrap();
-                let to_print = match param {
-                    EvalValue::Value(val) => val.get_str(),
-                    EvalValue::Token(tok) => match tok {
-                        Token::Identifier(ident) => {
-                            let var_ptr = get_var_ptr(vars, &ident, scope);
-                            let var_borrow = var_ptr.borrow();
-                            let var_value = &*var_borrow.value.borrow();
-                            var_value.get_str()
-                        }
-                        _ => value_from_token(&tok, None).get_str(),
-                    },
-                };
+        |vars, params, scope, stdout| {
+            print_abstracted(vars, params, scope, stdout);
 
-                let to_print = to_print.as_str();
-                let bytes = to_print.as_bytes();
+            None
+        },
+    )));
 
-                stdout.write_all(bytes).unwrap();
-                if i < &params.len() - 1 {
-                    stdout.write_all(b", ").unwrap();
-                }
-            }
+    functions.push(Func::Builtin(BuiltinFunc::new(
+        "println",
+        |vars, params, scope, stdout| {
+            print_abstracted(vars, params, scope, stdout);
 
             stdout.write_all(b"\n").unwrap();
             None
@@ -192,5 +215,22 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
             None
         },
-    )))
+    )));
+
+    functions.push(Func::Builtin(BuiltinFunc::new(
+        "parse",
+        |vars, mut params, scope, _| {
+            expect_params("parse", 1, params.len());
+
+            let param = params[0].take().unwrap();
+            let val = get_eval_value(vars, param, scope, false);
+
+            if let Value::String(s) = val {
+                let token = Token::Number(s);
+                Some(value_from_token(&token, None))
+            } else {
+                panic!("Expected string in parse function");
+            }
+        },
+    )));
 }

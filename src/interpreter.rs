@@ -412,9 +412,10 @@ pub fn eval_exp<'a>(
 ) -> EvalValue {
     let mut flattened = flatten_exp(vars, functions, structs, scope, exp, stdout);
 
-    let pemdas_operations: [OperatorType; 4] = [
+    let pemdas_operations: [OperatorType; 5] = [
         OperatorType::Mult,
         OperatorType::Div,
+        OperatorType::Mod,
         OperatorType::Add,
         OperatorType::Sub,
     ];
@@ -453,6 +454,10 @@ pub fn eval_exp<'a>(
                                 },
                                 OperatorType::Sub => match op_type {
                                     OperatorType::Sub => expr_abstracted!(left, right, -),
+                                    _ => None,
+                                },
+                                OperatorType::Mod => match op_type {
+                                    OperatorType::Mod => expr_abstracted!(left, right, %),
                                     _ => None,
                                 },
                             };
@@ -548,6 +553,8 @@ macro_rules! for_loop {
                 *var_ptr.borrow_mut().value.borrow_mut() = Value::$variant(current);
             }
         }
+
+        $vars.free(&$name, $scope);
 
         res
     }};

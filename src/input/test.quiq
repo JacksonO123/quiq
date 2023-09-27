@@ -1,2 +1,0 @@
-string temp = readFile("test.txt");
-print(temp);
