@@ -1049,6 +1049,34 @@ pub fn push_to_array<'a>(
     }
 }
 
+pub fn unshift_array<'a>(
+    vars: &mut Variables,
+    functions: &mut Vec<Func<'a>>,
+    structs: &mut StructInfo,
+    scope: usize,
+    arr: &mut Vec<Value>,
+    arr_type: &VarType,
+    args: &Vec<AstNode>,
+    stdout: &mut Stdout,
+) {
+    for (i, arg) in args.iter().enumerate() {
+        let arg_res_option = eval_node(vars, functions, structs, scope, arg, stdout);
+
+        if let (Some(arg_res), _) = arg_res_option {
+            let val = get_eval_value(vars, arg_res, scope, false);
+            let val_type = type_from_value(&val);
+            if !compare_types(structs, &arr_type, &val_type) {
+                panic!(
+                    "Error pushing to array, expected type: {:?} found {:?}",
+                    arr_type,
+                    type_from_value(&val),
+                );
+            }
+            arr.insert(i, val);
+        }
+    }
+}
+
 pub fn type_from_value(val: &Value) -> VarType {
     match val {
         Value::Ref(ref_ptf) => {

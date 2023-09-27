@@ -5,7 +5,7 @@ use crate::{
     helpers::{
         cast, compare, compare_types, flatten_exp, get_eval_value, get_prop_ptr, get_ref_value,
         index_arr_var_value, make_var, push_to_array, set_index_arr, set_var_value,
-        type_from_value, ExpValue,
+        type_from_value, unshift_array, ExpValue,
     },
     tokenizer::{OperatorType, Token},
     variables::Variables,
@@ -855,14 +855,40 @@ pub fn eval_node<'a>(
                                             vars, functions, structs, scope, vals, arr_type, args,
                                             stdout,
                                         );
-                                        None
+                                        return (None, None);
+                                    }
+                                    "pop" => {
+                                        let last = vals.pop();
+                                        if let Some(last) = last {
+                                            return (Some(EvalValue::Value(last)), None);
+                                        } else {
+                                            panic!("No elements to pop from array");
+                                        }
+                                    }
+                                    "shift" => {
+                                        if vals.len() == 0 {
+                                            panic!("No elements to shift from array");
+                                        }
+
+                                        let first = vals.remove(0);
+                                        return (Some(EvalValue::Value(first)), None);
+                                    }
+                                    "unshift" => {
+                                        unshift_array(
+                                            vars, functions, structs, scope, vals, arr_type, args,
+                                            stdout,
+                                        );
+                                        return (None, None);
                                     }
                                     _ => panic!("Unknown array method: {}", name),
                                 },
                                 AstNode::Token(t) => match t {
                                     Token::Identifier(ident) => match ident.as_str() {
                                         "length" => {
-                                            Some(EvalValue::Value(Value::Usize(vals.len())))
+                                            return (
+                                                Some(EvalValue::Value(Value::Usize(vals.len()))),
+                                                None,
+                                            );
                                         }
                                         _ => unimplemented!(),
                                     },
@@ -984,8 +1010,6 @@ pub fn eval_node<'a>(
                                     _ => panic!("Unexpected operation: {:?}", path_item),
                                 }
                             }
-
-                            None
                         }
                         _ => unimplemented!(),
                     };
