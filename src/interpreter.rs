@@ -304,7 +304,7 @@ pub fn value_from_token<'a>(t: &Token, value_type: Option<&VarType>) -> Value {
         Token::String(s) => Value::String(s.to_string()),
         Token::Bool(b) => Value::Bool(*b),
         Token::Null => Value::Null,
-        Token::Identifier(i) => {
+        Token::Identifier(_) => {
             panic!("Cannot get token value of identifier");
         }
         _ => panic!("Cannot get value from token: {:?}", t),
@@ -824,171 +824,194 @@ pub fn eval_node<'a>(
                 panic!("Error in struct property access, expected identifier");
             };
 
-            let var_value = &*var_ptr.borrow_mut();
-            let temp_val = &var_value.value;
-            let mut value = get_ref_value(temp_val);
+            let mut func_to_call: Option<CustomFunc> = None;
+            let mut args_for_func: Option<&Vec<AstNode>> = None;
+            let mut current_struct: Option<Rc<RefCell<Value>>> = None;
 
-            let mut i = 0;
-            while i < access_path.len() {
-                let mut temp_value: Option<Rc<RefCell<Value>>> = None;
-                let mut prop_func: Option<CustomFunc> = None;
-                let mut prop_args: Option<&Vec<AstNode>> = None;
+            let res = {
+                let var_value = &*var_ptr.borrow_mut();
+                let temp_val = &var_value.value;
+                let mut value = get_ref_value(temp_val);
 
-                match &mut *value.borrow_mut() {
-                    Value::Array(ref mut vals, arr_type) => {
-                        match &access_path
-                            .get(i)
-                            .expect("Expected property to access on Array")
-                        {
-                            AstNode::CallFunc(name, args) => match name.as_str() {
-                                "push" => {
-                                    push_to_array(
-                                        vars, functions, structs, scope, vals, arr_type, args,
-                                        stdout,
-                                    );
-                                    None
-                                }
-                                _ => panic!("Unknown array method: {}", name),
-                            },
-                            AstNode::Token(t) => match t {
-                                Token::Identifier(ident) => match ident.as_str() {
-                                    "length" => Some(EvalValue::Value(Value::Usize(vals.len()))),
-                                    _ => unimplemented!(),
+                current_struct = Some(Rc::clone(&value));
+
+                let mut i = 0;
+                while i < access_path.len() {
+                    let mut temp_value: Option<Rc<RefCell<Value>>> = None;
+
+                    match &mut *value.borrow_mut() {
+                        Value::Array(ref mut vals, arr_type) => {
+                            match &access_path
+                                .get(i)
+                                .expect("Expected property to access on Array")
+                            {
+                                AstNode::CallFunc(name, args) => match name.as_str() {
+                                    "push" => {
+                                        push_to_array(
+                                            vars, functions, structs, scope, vals, arr_type, args,
+                                            stdout,
+                                        );
+                                        None
+                                    }
+                                    _ => panic!("Unknown array method: {}", name),
                                 },
-                                _ => panic!("Unexpected method: {:?}", t),
-                            },
-                            _ => panic!("Unexpected operation: {:?}", access_path),
+                                AstNode::Token(t) => match t {
+                                    Token::Identifier(ident) => match ident.as_str() {
+                                        "length" => {
+                                            Some(EvalValue::Value(Value::Usize(vals.len())))
+                                        }
+                                        _ => unimplemented!(),
+                                    },
+                                    _ => panic!("Unexpected method: {:?}", t),
+                                },
+                                _ => panic!("Unexpected operation: {:?}", access_path),
+                            }
                         }
-                    }
-                    Value::Struct(_, _, ref mut props) => {
-                        if i < access_path.len() {
-                            let mut path_item = access_path.get(i).unwrap();
-                            match &mut path_item {
-                                AstNode::Token(tok) => match tok {
-                                    Token::Identifier(ident) => {
-                                        temp_value = Some(get_prop_ptr(props, ident).unwrap());
+                        Value::Struct(_, _, ref mut props) => {
+                            if i < access_path.len() {
+                                let mut path_item = access_path.get(i).unwrap();
+                                match &mut path_item {
+                                    AstNode::Token(tok) => match tok {
+                                        Token::Identifier(ident) => {
+                                            let val_ptr = get_prop_ptr(props, ident);
+                                            if let Some(val_ptr) = val_ptr {
+                                                temp_value = Some(Rc::clone(&val_ptr));
+                                                current_struct = Some(Rc::clone(&val_ptr));
+                                            } else {
+                                                panic!(
+                                                    "Property \"{}\" not found on struct",
+                                                    ident
+                                                );
+                                            }
+                                        }
+                                        _ => panic!("Unexpected operation on struct: {:?}", tok),
+                                    },
+                                    AstNode::SetVar(tok, node) => {
+                                        let (res_val, _) = eval_node(
+                                            vars, functions, structs, scope, node, stdout,
+                                        );
+
+                                        let eval_val = get_eval_value(
+                                            vars,
+                                            res_val
+                                                .expect("Expected value to set to struct property"),
+                                            scope,
+                                            true,
+                                        );
+
+                                        let ptr = if let Token::Identifier(ident) = tok {
+                                            get_prop_ptr(props, ident)
+                                        } else {
+                                            panic!("Expected identifier to set struct property")
+                                        }
+                                        .unwrap();
+
+                                        *ptr.borrow_mut() = eval_val;
                                     }
-                                    _ => panic!("Unexpected operation on struct: {:?}", tok),
-                                },
-                                AstNode::SetVar(tok, node) => {
-                                    let (res_val, _) =
-                                        eval_node(vars, functions, structs, scope, node, stdout);
-
-                                    let eval_val = get_eval_value(
-                                        vars,
-                                        res_val.expect("Expected value to set to struct property"),
-                                        scope,
-                                        true,
-                                    );
-
-                                    let ptr = if let Token::Identifier(ident) = tok {
-                                        get_prop_ptr(props, ident)
-                                    } else {
-                                        panic!("Expected identifier to set struct property")
-                                    }
-                                    .unwrap();
-
-                                    *ptr.borrow_mut() = eval_val;
-                                }
-                                AstNode::IndexArr(tok, node) => {
-                                    let ptr_option = if let Token::Identifier(ident) = tok {
-                                        get_prop_ptr(props, ident)
-                                    } else {
-                                        panic!(
+                                    AstNode::IndexArr(tok, node) => {
+                                        let ptr_option = if let Token::Identifier(ident) = tok {
+                                            get_prop_ptr(props, ident)
+                                        } else {
+                                            panic!(
                                             "Expected identifier to index array on struct property"
                                         )
-                                    };
+                                        };
 
-                                    let (eval_value, _) =
-                                        eval_node(vars, functions, structs, scope, node, stdout);
+                                        let (eval_value, _) = eval_node(
+                                            vars, functions, structs, scope, node, stdout,
+                                        );
 
-                                    let eval_value = get_eval_value(
-                                        vars,
-                                        eval_value
-                                            .expect("Expected value to index struct property by"),
-                                        scope,
-                                        true,
-                                    );
+                                        let eval_value = get_eval_value(
+                                            vars,
+                                            eval_value.expect(
+                                                "Expected value to index struct property by",
+                                            ),
+                                            scope,
+                                            true,
+                                        );
 
-                                    let index_value = if let Value::Ref(r) = eval_value {
-                                        get_ref_value(&r)
-                                    } else {
-                                        Rc::new(RefCell::new(eval_value))
-                                    };
+                                        let index_value = if let Value::Ref(r) = eval_value {
+                                            get_ref_value(&r)
+                                        } else {
+                                            Rc::new(RefCell::new(eval_value))
+                                        };
 
-                                    if let Value::Usize(index) = *index_value.borrow() {
-                                        if let Some(ptr) = ptr_option {
-                                            let ptr_val = &*ptr.borrow();
-                                            if let Value::Array(items, _) = ptr_val {
-                                                if let Value::Ref(r) = &items[index] {
-                                                    temp_value = Some(Rc::new(RefCell::new(
-                                                        Value::Ref(Rc::clone(&r)),
-                                                    )));
-                                                } else {
-                                                    if i == access_path.len() - 1 {
-                                                        return (
-                                                            Some(EvalValue::Value(
-                                                                items[index].clone(),
-                                                            )),
-                                                            None,
-                                                        );
-                                                    } else {
+                                        if let Value::Usize(index) = *index_value.borrow() {
+                                            if let Some(ptr) = ptr_option {
+                                                let ptr_val = &*ptr.borrow();
+                                                if let Value::Array(items, _) = ptr_val {
+                                                    if let Value::Ref(r) = &items[index] {
                                                         temp_value = Some(Rc::new(RefCell::new(
-                                                            items[index].clone(),
+                                                            Value::Ref(Rc::clone(&r)),
                                                         )));
+                                                    } else {
+                                                        if i == access_path.len() - 1 {
+                                                            return (
+                                                                Some(EvalValue::Value(
+                                                                    items[index].clone(),
+                                                                )),
+                                                                None,
+                                                            );
+                                                        } else {
+                                                            temp_value = Some(Rc::new(
+                                                                RefCell::new(items[index].clone()),
+                                                            ));
+                                                        }
                                                     }
                                                 }
                                             }
-                                        }
-                                    } else {
-                                        panic!("Array can only be indexed by usize")
-                                    };
-                                }
-                                AstNode::CallFunc(name, args) => {
-                                    let prop = get_prop_ptr(props, name);
-
-                                    if let Some(prop_val) = prop {
-                                        if let Value::Fn(func) = &*prop_val.borrow() {
-                                            let func = &*func.borrow();
-                                            prop_func = Some(func.clone());
-                                            prop_args = Some(args);
-                                        }
-                                    } else {
-                                        panic!("Undefined property {}", name);
+                                        } else {
+                                            panic!("Array can only be indexed by usize")
+                                        };
                                     }
+                                    AstNode::CallFunc(name, args) => {
+                                        let prop = get_prop_ptr(props, name);
+
+                                        if let Some(prop_val) = prop {
+                                            if let Value::Fn(func) = &*prop_val.borrow() {
+                                                let func = &*func.borrow();
+                                                func_to_call = Some(func.clone());
+                                                args_for_func = Some(args);
+                                            }
+                                        } else {
+                                            panic!("Undefined property {}", name);
+                                        }
+                                    }
+                                    _ => panic!("Unexpected operation: {:?}", path_item),
                                 }
-                                _ => panic!("Unexpected operation: {:?}", path_item),
                             }
+
+                            None
                         }
+                        _ => unimplemented!(),
+                    };
 
-                        None
+                    if let Some(val) = temp_value {
+                        value = val;
                     }
-                    _ => unimplemented!(),
-                };
 
-                if let Some(func) = prop_func {
-                    let res = func.call(
-                        vars,
-                        functions,
-                        structs,
-                        scope,
-                        stdout,
-                        prop_args.unwrap(),
-                        Some(Rc::clone(&value)),
-                    );
-                    if let Some(res_val) = res {
-                        return (Some(EvalValue::Value(res_val)), None);
-                    }
+                    i += 1;
                 }
 
-                if let Some(val) = temp_value {
-                    value = val;
-                }
+                (Some(EvalValue::Value(Value::Ref(value))), None)
+            };
 
-                i += 1;
+            if let Some(func) = func_to_call {
+                let res = func.call(
+                    vars,
+                    functions,
+                    structs,
+                    scope,
+                    stdout,
+                    args_for_func.unwrap(),
+                    Some(Rc::clone(&current_struct.unwrap())),
+                );
+                if let Some(res_val) = res {
+                    return (Some(EvalValue::Value(res_val)), None);
+                }
             }
 
-            (Some(EvalValue::Value(Value::Ref(value))), None)
+            res
         }
         AstNode::Array(arr_nodes, arr_type) => {
             let mut res_arr: Vec<Value> = Vec::new();

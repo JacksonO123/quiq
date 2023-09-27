@@ -1824,7 +1824,7 @@ fn get_builtin_generic(
                 Token::Type(t) => t.clone(),
                 Token::Identifier(ident) => {
                     let struct_info = structs.available_structs.get(ident.as_str());
-                    if let Some(struct_shape) = struct_info {
+                    if let Some(_) = struct_info {
                         VarType::Struct(ident.clone())
                     } else {
                         panic!("Unexpected type {}", ident);
@@ -1851,7 +1851,7 @@ fn get_builtin_generic(
             let param_tokens = tokens_to_delimiter(tokens, 2, ",");
             let param_type = if let Token::Identifier(ident) = param_tokens[0].as_ref().unwrap() {
                 let struct_info = structs.available_structs.get(ident.as_str());
-                if let Some(struct_shape) = struct_info {
+                if let Some(_) = struct_info {
                     VarType::Struct(ident.clone())
                 } else {
                     panic!("Unexpected type {}", ident);

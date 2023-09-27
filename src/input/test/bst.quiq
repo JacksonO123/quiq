@@ -27,10 +27,8 @@ func createBstNode(int val) BstNode {
     right: null,
     value: val,
     add: func (ref<BstNode> self, int val) void {
+      print(self.value);
       print("adding in node");
-      if (val < self.value) {
-        print("in block");
-      }
     }
   }
 }

@@ -441,6 +441,7 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
                 Token::Keyword(Keyword::If) => true,
                 Token::Keyword(Keyword::Else) => true,
                 Token::Keyword(Keyword::Return) => true,
+                Token::Identifier(_) => true,
                 _ => false,
             } {
                 offset += 1;
