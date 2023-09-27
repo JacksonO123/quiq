@@ -1,4 +1,4 @@
-use std::{cell::RefCell, collections::HashMap, io::Stdout, process::exit, rc::Rc};
+use std::{cell::RefCell, io::Stdout, process::exit, rc::Rc};
 
 use crate::{
     ast::{get_ast_node, get_value_arr_str, AstNode, FuncParam, StructShape, Value},
@@ -7,10 +7,12 @@ use crate::{
         StructProp, VarType, VarValue,
     },
     tokenizer::{Keyword, Token},
+    variables::Variables,
 };
 
 pub fn make_var<'a>(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    vars: &mut Variables,
     functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
     scope: usize,
@@ -27,7 +29,25 @@ pub fn make_var<'a>(
 
     if let (Some(tok), _) = value {
         let val = match tok {
-            EvalValue::Token(t) => value_from_token(&t, Some(var_type)),
+            EvalValue::Token(t) => {
+                if let Token::Identifier(name) = t {
+                    let var = vars.get(&name, scope);
+                    if let Some(var) = var {
+                        let var_ref = &*var.borrow();
+                        let value = &var_ref.value;
+                        let val_ref = &*value.borrow();
+                        if let Value::Ref(r) = val_ref {
+                            Value::Ref(Rc::clone(&r))
+                        } else {
+                            val_ref.clone()
+                        }
+                    } else {
+                        panic!("Unknown identifier: {}", name);
+                    }
+                } else {
+                    value_from_token(&t, Some(var_type))
+                }
+            }
             EvalValue::Value(v) => match v {
                 Value::Null => v,
                 _ => {
@@ -55,12 +75,7 @@ pub fn make_var<'a>(
             panic!("Expected identifier for variable name");
         };
 
-        let var = Rc::new(RefCell::new(VarValue::new(
-            var_name.clone(),
-            val,
-            var_type.clone(),
-            scope,
-        )));
+        let var = VarValue::new(var_name.clone(), val, var_type.clone(), scope);
         vars.insert(var_name.clone(), var);
     } else {
         panic!("Expected {} found void", var_type.get_str());
@@ -492,37 +507,38 @@ pub fn create_func_call_node<'a>(
 }
 
 pub fn set_var_value<'a>(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    vars: &mut Variables,
     structs: &mut StructInfo,
     name: String,
     value: Value,
+    scope: usize,
 ) {
-    let res_option = vars.get(&name);
-    if let Some(res) = res_option {
-        let value_ref = res.borrow_mut();
-        let var_value = &value_ref.value;
-        let var_value_type = type_from_value(&*(var_value.borrow()));
-        match var_value_type {
-            VarType::Ref(_) => {
-                if compare_types(structs, &value_ref.var_type, &var_value_type) {
-                    if let Value::Ref(ref mut inner_val) = &mut *value_ref.value.borrow_mut() {
+    let res_option = vars.get(&name, scope);
+    if let Some(var_info) = res_option {
+        let var_ref = &*var_info.borrow();
+        let var_value = &var_ref.value;
+        let new_value_type = type_from_value(&value);
+        match &var_ref.var_type {
+            VarType::Ref(inner_type) => {
+                if compare_types(structs, inner_type.as_ref(), &new_value_type) {
+                    if let Value::Ref(ref mut inner_val) = &mut *var_value.borrow_mut() {
                         *inner_val.borrow_mut() = value;
                     }
                 } else {
                     panic!(
                         "expected type: {:?} found {:?}",
-                        var_value_type,
+                        new_value_type,
                         type_from_value(&value)
                     );
                 }
             }
             _ => {
-                if compare_types(structs, &value_ref.var_type, &var_value_type) {
-                    *value_ref.value.borrow_mut() = value;
+                if compare_types(structs, &var_ref.var_type, &new_value_type) {
+                    *var_value.borrow_mut() = value;
                 } else {
                     panic!(
                         "expected type: {:?} found {:?}",
-                        var_value_type,
+                        new_value_type,
                         type_from_value(&value)
                     );
                 }
@@ -711,7 +727,8 @@ pub enum ExpValue {
 }
 
 pub fn flatten_exp<'a>(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    vars: &mut Variables,
     functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
     scope: usize,
@@ -727,7 +744,7 @@ pub fn flatten_exp<'a>(
                 EvalValue::Token(tok) => match tok {
                     Token::Operator(_) => ExpValue::Operator(tok),
                     Token::Identifier(ident) => {
-                        let var_ptr = get_var_ptr(vars, &ident);
+                        let var_ptr = get_var_ptr(vars, &ident, scope);
                         let var_ref = var_ptr.borrow();
                         let var_value_borrow = var_ref.value.borrow();
 
@@ -952,8 +969,10 @@ fn in_union(structs: &mut StructInfo, union: &Vec<VarType>, t: &VarType) -> bool
 }
 
 pub fn get_eval_value<'a>(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    // vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    vars: &mut Variables,
     val: EvalValue,
+    scope: usize,
     return_ptr: bool,
 ) -> Value {
     match val {
@@ -964,7 +983,7 @@ pub fn get_eval_value<'a>(
             Token::Bool(_) => value_from_token(&t, None),
             Token::Null => value_from_token(&t, None),
             Token::Identifier(ident) => {
-                let var_ptr = get_var_ptr(vars, &ident);
+                let var_ptr = get_var_ptr(vars, &ident, scope);
                 let var_ref = var_ptr.borrow();
 
                 if return_ptr {
@@ -1003,7 +1022,7 @@ pub fn get_prop_ptr(props: &mut Vec<StructProp>, name: &String) -> Option<Rc<Ref
 }
 
 pub fn push_to_array<'a>(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    vars: &mut Variables,
     functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
     scope: usize,
@@ -1016,7 +1035,7 @@ pub fn push_to_array<'a>(
         let arg_res_option = eval_node(vars, functions, structs, scope, arg, stdout);
 
         if let (Some(arg_res), _) = arg_res_option {
-            let val = get_eval_value(vars, arg_res, false);
+            let val = get_eval_value(vars, arg_res, scope, false);
             let val_type = type_from_value(&val);
             if !compare_types(structs, &arr_type, &val_type) {
                 panic!(
@@ -1464,12 +1483,12 @@ macro_rules! comp {
                     Value::$variants(l) => match $right {
                         Value::$variants(r) => Ok(l == r),
                         Value::Array(_, _) => Err(String::from("Cannot compare arrays")),
-                        _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
+                        _ => Ok(false)
                     }
                 )*
                 Value::Array(left_arr, left_type) => match $right {
                     Value::Array(right_arr, right_type) => Ok(compare_array($structs, left_arr, right_arr, left_type, right_type)),
-                    _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
+                    _ => Ok(false)
                 }
                 Value::Struct(left_name, _, props_left) => match $right {
                     Value::Struct(right_name, _, props_right) => {
@@ -1479,13 +1498,16 @@ macro_rules! comp {
                             compare_struct_values($structs, props_left, props_right)
                         })
                     },
-                    _ => Err(format!("Error, different types. Found {} and {}", $left.get_enum_str(), $right.get_enum_str()))
+                    _ => Ok(false)
                 },
                 Value::Null => match $right {
                     Value::Null => Ok(true),
                     _ => Ok(false),
                 }
-                Value::Ref(_) => Err(String::from("Cannot compare refs")),
+                Value::Ref(r) => {
+                    let new_left = &*r.borrow();
+                    comp_eq_abstraction($structs, new_left, $right)
+                },
                 Value::Fn(_) => Err(String::from("Cannot compare functions"))
             }
         }
@@ -1528,6 +1550,14 @@ macro_rules! comp_match {
             _ => panic!("Expected comparison operator"),
         }
     }
+}
+
+fn comp_eq_abstraction(
+    structs: &mut StructInfo,
+    left: &Value,
+    right: &Value,
+) -> Result<bool, String> {
+    comp_bind!(structs, left, right, ==)
 }
 
 fn compare_array(
@@ -1591,11 +1621,12 @@ fn compare_struct_values(
 }
 
 pub fn compare<'a>(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    vars: &mut Variables,
     structs: &mut StructInfo,
     left: EvalValue,
     right: EvalValue,
     comp_token: &Token,
+    scope: usize,
 ) -> EvalValue {
     let res = match left {
         EvalValue::Value(left_val) => match right {
@@ -1604,7 +1635,7 @@ pub fn compare<'a>(
             }
             EvalValue::Token(t) => match t {
                 Token::Identifier(ident) => {
-                    let var_ptr = get_var_ptr(vars, &ident);
+                    let var_ptr = get_var_ptr(vars, &ident, scope);
                     let var_ref = var_ptr.borrow();
                     let right_val = &*var_ref.value.borrow();
                     comp_match!(structs, comp_token, &left_val, right_val)
@@ -1617,7 +1648,7 @@ pub fn compare<'a>(
         },
         EvalValue::Token(t) => match t {
             Token::Identifier(ident) => {
-                let var_ptr = get_var_ptr(vars, &ident);
+                let var_ptr = get_var_ptr(vars, &ident, scope);
                 let var_ref = var_ptr.borrow();
                 let left_val = &*var_ref.value.borrow();
                 match right {
@@ -1626,7 +1657,7 @@ pub fn compare<'a>(
                     }
                     EvalValue::Token(t) => match t {
                         Token::Identifier(ident) => {
-                            let var_ptr = get_var_ptr(vars, &ident);
+                            let var_ptr = get_var_ptr(vars, &ident, scope);
                             let var_ref = var_ptr.borrow();
                             let right_val = &*var_ref.value.borrow();
                             comp_match!(structs, comp_token, &left_val, right_val)
@@ -1647,7 +1678,7 @@ pub fn compare<'a>(
                     }
                     EvalValue::Token(t) => match t {
                         Token::Identifier(ident) => {
-                            let var_ptr = get_var_ptr(vars, &ident);
+                            let var_ptr = get_var_ptr(vars, &ident, scope);
                             let var_ref = var_ptr.borrow();
                             let right_val = &*var_ref.value.borrow();
                             comp_match!(structs, comp_token, &left_val, right_val)
@@ -1672,13 +1703,14 @@ pub fn compare<'a>(
 }
 
 pub fn index_arr_var_value(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    vars: &mut Variables,
     arr: Rc<RefCell<VarValue>>,
     index: EvalValue,
+    scope: usize,
 ) -> Value {
     match &*arr.borrow().value.borrow() {
         Value::Array(arr, _) => {
-            let index = get_eval_value(vars, index, false);
+            let index = get_eval_value(vars, index, scope, false);
 
             if let Value::Usize(val) = index {
                 arr[val].clone()
@@ -1691,7 +1723,7 @@ pub fn index_arr_var_value(
 }
 
 pub fn set_index_arr<'a>(
-    vars: &mut HashMap<String, Rc<RefCell<VarValue>>>,
+    vars: &mut Variables,
     functions: &mut Vec<Func<'a>>,
     structs: &mut StructInfo,
     scope: usize,
@@ -1701,11 +1733,11 @@ pub fn set_index_arr<'a>(
     value: AstNode,
 ) {
     if let (Some(value), _) = eval_node(vars, functions, structs, scope, &value, stdout) {
-        let index_val = get_eval_value(vars, index, true);
+        let index_val = get_eval_value(vars, index, scope, true);
         match index_val {
             Value::Usize(val) => match *arr.borrow_mut().value.borrow_mut() {
                 Value::Array(ref mut arr_val, _) => {
-                    arr_val[val] = get_eval_value(vars, value, true);
+                    arr_val[val] = get_eval_value(vars, value, scope, true);
                 }
                 _ => panic!("Only arrays can be indexed"),
             },

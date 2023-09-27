@@ -3,6 +3,7 @@ mod builtins;
 mod helpers;
 mod interpreter;
 mod tokenizer;
+mod variables;
 
 use std::cell::RefCell;
 use std::collections::HashMap;
@@ -13,6 +14,7 @@ use std::time::Instant;
 use std::{env::args, fs};
 
 use interpreter::StructInfo;
+use variables::Variables;
 
 use crate::ast::generate_tree;
 use crate::builtins::init_builtins;
@@ -44,10 +46,11 @@ fn main() {
     let tree = generate_tree(&mut struct_info, &mut tokens);
     let tree_end = tree_start.elapsed();
 
-    let mut vars: HashMap<String, Rc<RefCell<VarValue>>> = HashMap::new();
+    // let mut vars: HashMap<String, Rc<RefCell<VarValue>>> = HashMap::new();
+    let mut vars = Variables::new();
     let mut functions = vec![];
 
-    init_builtins(&mut vars, &mut functions);
+    init_builtins(&mut functions);
 
     let mut stdout = io::stdout();
 

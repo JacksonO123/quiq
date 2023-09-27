@@ -1,11 +1,18 @@
+struct BstNodeAddParams {
+  self: ref<BstNode>;
+  val: int;
+}
+
 struct BstNode {
   left: union<ref<BstNode>, null>;
   right: union<ref<BstNode>, null>;
+  add: fn<BstNodeAddParams, void>;
   value: int;
 }
 
 struct BstAddParams {
   self: ref<Bst>;
+  val: int;
 }
 
 struct Bst {
@@ -14,16 +21,35 @@ struct Bst {
   val: int;
 }
 
+func createBstNode(int val) BstNode {
+  return <BstNode>{
+    left: null,
+    right: null,
+    value: val,
+    add: func (ref<BstNode> self, int val) void {
+      print("adding in node");
+      if (val < self.value) {
+        print("in block");
+      }
+    }
+  }
+}
+
 func createBst() Bst {
   return <Bst>{
     root: null,
     val: 1,
-    add: func (ref<Bst> self) void {
-      self.val = 2;
+    add: func (ref<Bst> self, int val) void {
+      if (self.root == null) {
+        self.root = createBstNode(val);
+      } else {
+        self.root.add(val);
+      }
     }
   }
 }
 
 Bst a = createBst();
-a.add();
+a.add(2);
+a.add(3);
 print(a);
