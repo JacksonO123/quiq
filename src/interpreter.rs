@@ -905,7 +905,7 @@ pub fn eval_node<'a>(
                                                 None,
                                             );
                                         }
-                                        _ => unimplemented!(),
+                                        _ => panic!("Property {} does not exist on Array", ident),
                                     },
                                     _ => panic!("Unexpected method: {:?}", t),
                                 },
@@ -1026,7 +1026,7 @@ pub fn eval_node<'a>(
                                 }
                             }
                         }
-                        _ => unimplemented!(),
+                        _ => panic!("Unexpected path value {:?}", value),
                     };
 
                     if let Some(val) = temp_value {

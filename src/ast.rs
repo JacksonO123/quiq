@@ -343,7 +343,7 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
                                                 panic!("expected value to set at index");
                                             }
                                         }
-                                        _ => unimplemented!(),
+                                        _ => panic!("Unexpected token \"{:?}\"", tokens[1]),
                                     }
                                 } else {
                                     AstNode::IndexArr(
