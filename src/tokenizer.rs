@@ -34,6 +34,8 @@ pub enum Keyword {
     Struct,
     Func,
     Return,
+    Break,
+    Continue,
 }
 impl Keyword {
     pub fn get_str(&self) -> &str {
@@ -45,6 +47,8 @@ impl Keyword {
             Keyword::Struct => "struct",
             Keyword::Func => "func",
             Keyword::Return => "return",
+            Keyword::Break => "break",
+            Keyword::Continue => "continue",
         }
     }
 }
@@ -226,6 +230,8 @@ pub fn tokenize(code: &str, structs: &mut StructInfo) -> Vec<Option<Token>> {
                 }
                 "func" => Token::Keyword(Keyword::Func),
                 "return" => Token::Keyword(Keyword::Return),
+                "break" => Token::Keyword(Keyword::Break),
+                "continue" => Token::Keyword(Keyword::Continue),
                 // booleans
                 "true" => Token::Bool(true),
                 "false" => Token::Bool(false),

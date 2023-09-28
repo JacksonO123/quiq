@@ -191,6 +191,8 @@ pub enum AstNode {
     /// struct type name, shape, props
     CreateStruct(String, Rc<RefCell<StructShape>>, Vec<(String, AstNode)>),
     Return(Box<AstNode>),
+    Break,
+    Continue,
 }
 
 impl AstNode {

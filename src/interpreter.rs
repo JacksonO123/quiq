@@ -521,9 +521,18 @@ macro_rules! for_loop {
                     $stdout,
                 );
 
-                if quit.is_some() {
-                    res = quit;
-                    break;
+                if let Some(quit_type) = &quit {
+                    match quit_type {
+                        QuitType::Return(_) => {
+                            res = quit;
+                            break;
+                        }
+                        QuitType::Break => {
+                            res = None;
+                            break;
+                        }
+                        _ => {}
+                    }
                 }
 
                 current += inc;
@@ -542,9 +551,18 @@ macro_rules! for_loop {
                     $stdout,
                 );
 
-                if quit.is_some() {
-                    res = quit;
-                    break;
+                if let Some(quit_type) = &quit {
+                    match quit_type {
+                        QuitType::Return(_) => {
+                            res = quit;
+                            break;
+                        }
+                        QuitType::Break => {
+                            res = None;
+                            break;
+                        }
+                        _ => {}
+                    }
                 }
 
                 current += inc;
@@ -579,6 +597,8 @@ pub fn eval_node<'a>(
     stdout: &mut Stdout,
 ) -> (Option<EvalValue>, Option<QuitType>) {
     match &node {
+        AstNode::Continue => (None, Some(QuitType::Continue)),
+        AstNode::Break => (None, Some(QuitType::Break)),
         AstNode::CreateStruct(name, shape, props) => {
             let mut struct_props: Vec<StructProp> = Vec::new();
             let shape_borrow = shape.borrow();
@@ -688,8 +708,12 @@ pub fn eval_node<'a>(
 
                 let (_, quit) = eval_node(vars, functions, structs, scope, block, stdout);
 
-                if quit.is_some() {
-                    return (None, quit);
+                if let Some(quit_type) = &quit {
+                    match quit_type {
+                        QuitType::Break => break,
+                        QuitType::Return(_) => return (None, quit),
+                        _ => {}
+                    }
                 }
             }
 
@@ -820,6 +844,7 @@ pub fn eval_node<'a>(
 
             let mut func_to_call: Option<CustomFunc> = None;
             let mut args_for_func: Option<&Vec<AstNode>> = None;
+            #[allow(unused_assignments)]
             let mut current_struct: Option<Rc<RefCell<Value>>> = None;
 
             let res = {
@@ -1111,15 +1136,9 @@ pub fn eval_node<'a>(
         AstNode::StatementSeq(seq) => {
             for node in seq.iter() {
                 let (_, quit) = eval_node(vars, functions, structs, scope, &node.borrow(), stdout);
-                match quit {
-                    Some(q) => match q {
-                        QuitType::Return(val) => {
-                            return (None, Some(QuitType::Return(val)));
-                        }
-                        _ => {}
-                    },
-                    _ => {}
-                };
+                if quit.is_some() {
+                    return (None, quit);
+                }
             }
             (None, None)
         }

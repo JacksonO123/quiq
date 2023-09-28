@@ -205,6 +205,8 @@ pub fn create_keyword_node<'a>(
     keyword: Keyword,
 ) -> Option<AstNode> {
     match keyword {
+        Keyword::Break => Some(AstNode::Break),
+        Keyword::Continue => Some(AstNode::Continue),
         Keyword::If => {
             // 2 because tokens: [if, (]
             let mut condition = tokens_to_delimiter(tokens, 2, ")");
