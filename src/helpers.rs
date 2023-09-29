@@ -592,7 +592,9 @@ pub fn tokens_to_delimiter<'a>(
                 }
                 _ => false,
             } {
-                open_brackets -= 1;
+                if open_brackets > 0 {
+                    open_brackets -= 1;
+                }
                 if has_unclosed_left_angle {
                     has_unclosed_left_angle = false;
                     continue;
@@ -1762,15 +1764,15 @@ pub fn set_index_arr<'a>(
     value: AstNode,
 ) {
     if let (Some(value), _) = eval_node(vars, functions, structs, scope, &value, stdout) {
-        let index_val = get_eval_value(vars, index, scope, true);
+        let index_val = get_eval_value(vars, index, scope, false);
         match index_val {
             Value::Usize(val) => match *arr.borrow_mut().value.borrow_mut() {
                 Value::Array(ref mut arr_val, _) => {
-                    arr_val[val] = get_eval_value(vars, value, scope, true);
+                    arr_val[val] = get_eval_value(vars, value, scope, false);
                 }
                 _ => panic!("Only arrays can be indexed"),
             },
-            _ => panic!("Array can only be indexed with usize"),
+            _ => panic!("Array can only be indexed with usize",),
         }
     } else {
         panic!("Expected value to set at array index");

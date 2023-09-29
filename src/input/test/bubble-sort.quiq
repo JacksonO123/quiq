@@ -1,0 +1,14 @@
+int[] arr = <int>[3, 4, 1, 2, 8, 4, 3];
+
+for (i; usize(0); arr.length - usize(1)) {
+  for (j; usize(0); arr.length - i - usize(1)) {
+    if (arr[j] > arr[j + usize(1)]) {
+      int temp = arr[j];
+      arr[j] = arr[j + usize(1)];
+      arr[j + usize(1)] = temp;
+      free(temp);
+    }
+  }
+}
+
+println(arr);

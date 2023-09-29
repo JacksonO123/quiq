@@ -61,7 +61,7 @@ func createBst() Bst {
 
 Bst a = createBst();
 
-for (i; 0; 48) {
+for (i; 0; 10) {
   a.add(i);
 }
 
