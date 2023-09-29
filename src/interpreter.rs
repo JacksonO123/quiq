@@ -912,7 +912,7 @@ pub fn eval_node<'a>(
                                 _ => panic!("Unexpected operation: {:?}", access_path),
                             }
                         }
-                        Value::Struct(_, _, ref mut props) => {
+                        Value::Struct(struct_name, _, ref mut props) => {
                             if i < access_path.len() {
                                 let mut path_item = access_path.get(i).unwrap();
                                 match &mut path_item {
@@ -944,14 +944,26 @@ pub fn eval_node<'a>(
                                             true,
                                         );
 
-                                        let ptr = if let Token::Identifier(ident) = tok {
-                                            get_prop_ptr(props, ident)
+                                        if let Token::Identifier(ident) = tok {
+                                            let struct_shape = Rc::clone(
+                                                &structs
+                                                    .available_structs
+                                                    .get(struct_name)
+                                                    .unwrap(),
+                                            );
+                                            let val_type = &*struct_shape.borrow();
+                                            let val_type = val_type.props.get(ident).unwrap();
+                                            let ptr = get_prop_ptr(props, ident).unwrap();
+
+                                            let new_val_type = type_from_value(&eval_val);
+                                            if !compare_types(structs, val_type, &new_val_type) {
+                                                panic!("Unable to set struct property of type {:?} to {:?}", val_type, new_val_type);
+                                            }
+
+                                            *ptr.borrow_mut() = eval_val;
                                         } else {
                                             panic!("Expected identifier to set struct property")
                                         }
-                                        .unwrap();
-
-                                        *ptr.borrow_mut() = eval_val;
                                     }
                                     AstNode::IndexArr(tok, node) => {
                                         let ptr_option = if let Token::Identifier(ident) = tok {
