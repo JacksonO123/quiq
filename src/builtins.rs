@@ -7,7 +7,7 @@ use std::{
 use crate::{
     ast::Value,
     helpers::{get_eval_value, get_file, get_ref_value, input, write_file},
-    interpreter::{get_var_ptr, value_from_token, BuiltinFunc, EvalValue, Func},
+    interpreter::{get_var_ptr, value_from_token, BuiltinFunc, EvalValue, Func, VarType},
     tokenizer::Token,
     variables::Variables,
 };
@@ -19,6 +19,16 @@ fn expect_params(name: &str, expected: usize, found: usize) {
             expected, name, found
         );
     }
+}
+
+macro_rules! get_value_variant {
+    ($val:expr, $variant:ident, $reason:expr) => {
+        if let Value::$variant(v) = &$val {
+            v
+        } else {
+            panic!("Expected {:?} in {}", stringify!($variant), $reason);
+        }
+    };
 }
 
 fn print_abstracted(
@@ -187,12 +197,9 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
             let param = params[0].take().unwrap();
             let val = get_eval_value(vars, param, scope, false);
 
-            if let Value::String(s) = &val {
-                let file = get_file(s);
-                Some(Value::String(file))
-            } else {
-                panic!("Expected string for file name to read");
-            }
+            let s = get_value_variant!(val, String, "readFile");
+            let file = get_file(s);
+            Some(Value::String(file))
         },
     )));
 
@@ -207,11 +214,9 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
             let dest = get_eval_value(vars, destination, scope, false);
             let info = get_eval_value(vars, info, scope, false);
 
-            if let Value::String(dest) = dest {
-                if let Value::String(info) = info {
-                    write_file(&dest, &info).expect("Error writing file");
-                }
-            }
+            let dest = get_value_variant!(dest, String, "writeFile");
+            let info = get_value_variant!(info, String, "writeFile");
+            write_file(&dest, &info).expect("Error writing file");
 
             None
         },
@@ -225,12 +230,55 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
             let param = params[0].take().unwrap();
             let val = get_eval_value(vars, param, scope, false);
 
-            if let Value::String(s) = val {
-                let token = Token::Number(s);
-                Some(value_from_token(&token, None))
-            } else {
-                panic!("Expected string in parse function");
-            }
+            let s = get_value_variant!(val, String, "parse");
+            let token = Token::Number(s.clone());
+            Some(value_from_token(&token, None))
+        },
+    )));
+
+    functions.push(Func::Builtin(BuiltinFunc::new(
+        "split",
+        |vars, mut params, scope, _| {
+            expect_params("split", 2, params.len());
+
+            let string = params[0].take().unwrap();
+            let delimiter = params[1].take().unwrap();
+
+            let val = get_eval_value(vars, string, scope, false);
+            let delimiter_val = get_eval_value(vars, delimiter, scope, false);
+
+            let string = get_value_variant!(val, String, "split");
+            let delimiter = get_value_variant!(delimiter_val, String, "split");
+
+            let res: Vec<&str> = string.split(delimiter).collect();
+            let res: Vec<Value> = res.iter().map(|&s| Value::String(s.to_string())).collect();
+
+            let arr_type = VarType::Array(Box::new(VarType::String));
+
+            Some(Value::Array(res, arr_type))
+        },
+    )));
+
+    functions.push(Func::Builtin(BuiltinFunc::new(
+        "substr",
+        |vars, mut params, scope, _| {
+            expect_params("substr", 3, params.len());
+
+            let str = params[0].take().unwrap();
+            let str_val = get_eval_value(vars, str, scope, false);
+            let str = get_value_variant!(str_val, String, "substr");
+
+            let from = params[1].take().unwrap();
+            let from_val = get_eval_value(vars, from, scope, false);
+            let from = get_value_variant!(from_val, Usize, "substr").clone();
+
+            let to = params[2].take().unwrap();
+            let to_val = get_eval_value(vars, to, scope, false);
+            let to = get_value_variant!(to_val, Usize, "substr").clone();
+
+            let res = &str[from..to];
+
+            Some(Value::String(res.to_string()))
         },
     )));
 }

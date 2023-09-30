@@ -1,8 +1,2 @@
-for (i; 10; 0) {
-  if (i == 5) {
-    break;
-  }
-  println(i);
-}
-
-println("after");
+string s = "123-123-432";
+println(substr(s, usize(4), usize(7)));
