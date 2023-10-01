@@ -528,16 +528,28 @@ pub fn set_var_value<'a>(
         let new_value_type = type_from_value(&value);
         match &var_ref.var_type {
             VarType::Ref(inner_type) => {
-                if compare_types(structs, inner_type.as_ref(), &new_value_type) {
-                    if let Value::Ref(ref mut inner_val) = &mut *var_value.borrow_mut() {
-                        *inner_val.borrow_mut() = value;
+                if let VarType::Ref(value_inner_type) = &new_value_type {
+                    if compare_types(structs, inner_type.as_ref(), &value_inner_type) {
+                        *var_value.borrow_mut() = value;
+                    } else {
+                        panic!(
+                            "expected type: {:?} found {:?}",
+                            new_value_type,
+                            type_from_value(&value)
+                        );
                     }
                 } else {
-                    panic!(
-                        "expected type: {:?} found {:?}",
-                        new_value_type,
-                        type_from_value(&value)
-                    );
+                    if compare_types(structs, inner_type.as_ref(), &new_value_type) {
+                        if let Value::Ref(ref mut inner_val) = &mut *var_value.borrow_mut() {
+                            *inner_val.borrow_mut() = value;
+                        }
+                    } else {
+                        panic!(
+                            "expected type: {:?} found {:?}",
+                            new_value_type,
+                            type_from_value(&value)
+                        );
+                    }
                 }
             }
             _ => {

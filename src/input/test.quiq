@@ -1,2 +1,11 @@
-string s = "123-123-432";
-println(substr(s, usize(4), usize(7)));
+int a = 2;
+int b = 4;
+
+ref<int> r = ref(a);
+
+a = 3;
+r = ref(b);
+
+b = 5;
+
+println(r);
