@@ -74,6 +74,8 @@ impl CustomFunc {
         args: &Vec<AstNode>,
         current_struct: Option<Rc<RefCell<Value>>>,
     ) -> Option<Value> {
+        vars.create_frame();
+
         if args.len() != self.params.len()
             && (args.len() != self.params.len() - 1 && self.params[0].name != "self")
         {
@@ -146,6 +148,8 @@ impl CustomFunc {
         for param in self.params.iter() {
             vars.free(&param.name, scope);
         }
+
+        vars.pop_frame();
 
         res
     }
@@ -243,7 +247,7 @@ impl VarValue {
 }
 
 pub fn get_var_ptr<'a>(vars: &mut Variables, name: &String, scope: usize) -> Rc<RefCell<VarValue>> {
-    let res_option = vars.get(name, scope);
+    let res_option = vars.get(name, scope, false);
     if let Some(res) = res_option {
         Rc::clone(&res)
     } else {
@@ -328,7 +332,6 @@ fn call_func<'a>(
         match func {
             Func::Custom(custom) => {
                 if &custom.borrow().name == name {
-                    vars.create_frame();
                     return custom
                         .borrow()
                         .call(vars, functions, structs, 0, stdout, args, None);
@@ -354,7 +357,7 @@ fn call_func<'a>(
         }
     }
 
-    let var_func = vars.get(name, scope);
+    let var_func = vars.get(name, scope, false);
     if let Some(func) = var_func {
         let func_clone = func.clone();
         let val = &*func_clone.borrow().value;
@@ -532,7 +535,7 @@ macro_rules! for_loop {
 
                 current += inc;
 
-                let var_ptr = $vars.get(&$name, $scope).unwrap();
+                let var_ptr = $vars.get(&$name, $scope, false).unwrap();
                 *var_ptr.borrow_mut().value.borrow_mut() = Value::$variant(current);
             }
         } else {
@@ -562,7 +565,7 @@ macro_rules! for_loop {
 
                 current += inc;
 
-                let var_ptr = $vars.get(&$name, $scope).unwrap();
+                let var_ptr = $vars.get(&$name, $scope, false).unwrap();
                 *var_ptr.borrow_mut().value.borrow_mut() = Value::$variant(current);
             }
         }
@@ -1151,7 +1154,7 @@ pub fn eval_node<'a>(
         }
         AstNode::MakeVar(var_type, name, value) => {
             if let Token::Identifier(ident) = name {
-                if vars.get(ident, scope).is_none() {
+                if vars.get(ident, scope, false).is_none() {
                     make_var(
                         vars, functions, structs, scope, var_type, name, value, stdout,
                     );

@@ -27,6 +27,9 @@ impl Variables {
     pub fn create_frame(&mut self) {
         self.frames.push(VarFrame::new());
     }
+    pub fn pop_frame(&mut self) {
+        self.frames.pop();
+    }
     pub fn insert(&mut self, name: String, value: VarValue) {
         self.insert_ptr(name, Rc::new(RefCell::new(value)));
     }
@@ -38,12 +41,31 @@ impl Variables {
             var_frame.vars.insert(name, vec![value]);
         }
     }
-    pub fn get(&self, name: &String, scope: usize) -> Option<Rc<RefCell<VarValue>>> {
+    pub fn get(
+        &self,
+        name: &String,
+        scope: usize,
+        from_prev: bool,
+    ) -> Option<Rc<RefCell<VarValue>>> {
         let var_frame = self.frames.last().unwrap();
         let var_arr = var_frame.vars.get(name);
+        let res = self.find_var_in_arr(var_arr, scope);
+        if res.is_none() && from_prev {
+            let var_frame = self.frames.get(self.frames.len() - 2).unwrap();
+            let var_arr = var_frame.vars.get(name);
+            self.find_var_in_arr(var_arr, scope)
+        } else {
+            res
+        }
+    }
+    fn find_var_in_arr(
+        &self,
+        arr: Option<&Vec<Rc<RefCell<VarValue>>>>,
+        scope: usize,
+    ) -> Option<Rc<RefCell<VarValue>>> {
         let mut max_scope = 0;
         let mut max_scope_index = 0;
-        if let Some(var_arr) = var_arr {
+        if let Some(var_arr) = arr {
             for (i, var) in var_arr.iter().enumerate() {
                 let var_ref = &*var.borrow();
                 if var_ref.scope == scope {

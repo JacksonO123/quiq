@@ -37,7 +37,7 @@ pub fn make_var<'a>(
         let val = match tok {
             EvalValue::Token(t) => {
                 if let Token::Identifier(name) = t {
-                    let var = vars.get(&name, scope);
+                    let var = vars.get(&name, scope, true);
                     if let Some(var) = var {
                         let var_ref = &*var.borrow();
                         let value = &var_ref.value;
@@ -521,7 +521,7 @@ pub fn set_var_value<'a>(
     value: Value,
     scope: usize,
 ) {
-    let res_option = vars.get(&name, scope);
+    let res_option = vars.get(&name, scope, false);
     if let Some(var_info) = res_option {
         let var_ref = &*var_info.borrow();
         let var_value = &var_ref.value;
