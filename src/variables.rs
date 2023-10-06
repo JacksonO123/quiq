@@ -2,28 +2,45 @@ use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::interpreter::VarValue;
 
-pub struct Variables {
+#[derive(Debug)]
+struct VarFrame {
     vars: HashMap<String, Vec<Rc<RefCell<VarValue>>>>,
+}
+impl VarFrame {
+    fn new() -> Self {
+        Self {
+            vars: HashMap::new(),
+        }
+    }
+}
+
+pub struct Variables {
+    frames: Vec<VarFrame>,
 }
 
 impl Variables {
     pub fn new() -> Self {
         Self {
-            vars: HashMap::new(),
+            frames: vec![VarFrame::new()],
         }
+    }
+    pub fn create_frame(&mut self) {
+        self.frames.push(VarFrame::new());
     }
     pub fn insert(&mut self, name: String, value: VarValue) {
         self.insert_ptr(name, Rc::new(RefCell::new(value)));
     }
     pub fn insert_ptr(&mut self, name: String, value: Rc<RefCell<VarValue>>) {
-        if let Some(var_arr) = self.vars.get_mut(&name) {
+        let var_frame = self.frames.last_mut().unwrap();
+        if let Some(var_arr) = var_frame.vars.get_mut(&name) {
             var_arr.push(value);
         } else {
-            self.vars.insert(name, vec![value]);
+            var_frame.vars.insert(name, vec![value]);
         }
     }
     pub fn get(&self, name: &String, scope: usize) -> Option<Rc<RefCell<VarValue>>> {
-        let var_arr = self.vars.get(name);
+        let var_frame = self.frames.last().unwrap();
+        let var_arr = var_frame.vars.get(name);
         let mut max_scope = 0;
         let mut max_scope_index = 0;
         if let Some(var_arr) = var_arr {
@@ -47,7 +64,8 @@ impl Variables {
         }
     }
     pub fn free(&mut self, name: &String, scope: usize) {
-        let var_arr = self.vars.get_mut(name);
+        let var_frame = self.frames.last_mut().unwrap();
+        let var_arr = var_frame.vars.get_mut(name);
 
         let mut max_scope = 0;
         let mut max_scope_index = 0;
@@ -78,6 +96,6 @@ impl Variables {
         }
     }
     pub fn print(&self) {
-        println!("{:#?}", self.vars);
+        println!("{:#?}", self.frames);
     }
 }

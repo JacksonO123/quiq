@@ -1,11 +1,11 @@
-int a = 2;
-int b = 4;
+func test1() void {
+  println("here");
+}
 
-ref<int> r = ref(a);
+func test() void {
+  int b = 3;
+  println(b);
+  test1();
+}
 
-a = 3;
-r = ref(b);
-
-b = 5;
-
-println(r);
+test();

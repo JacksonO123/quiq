@@ -328,15 +328,10 @@ fn call_func<'a>(
         match func {
             Func::Custom(custom) => {
                 if &custom.borrow().name == name {
-                    return custom.borrow().call(
-                        vars,
-                        functions,
-                        structs,
-                        scope + 1,
-                        stdout,
-                        args,
-                        None,
-                    );
+                    vars.create_frame();
+                    return custom
+                        .borrow()
+                        .call(vars, functions, structs, 0, stdout, args, None);
                 }
             }
             Func::Builtin(builtin) => {
