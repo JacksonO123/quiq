@@ -7,7 +7,7 @@ use crate::{
         index_arr_var_value, make_var, push_to_array, set_index_arr, set_var_value,
         type_from_value, unshift_array, ExpValue,
     },
-    tokenizer::{OperatorType, Token},
+    tokenizer::{BoolComp, OperatorType, Token},
     variables::Variables,
 };
 
@@ -1151,6 +1151,29 @@ pub fn eval_node<'a>(
                 }
             }
             (None, None)
+        }
+        AstNode::BoolExp(comparison, left, right) => {
+            let (left_val, _) = eval_node(vars, functions, structs, scope, left.as_ref(), stdout);
+            let left_val = left_val.expect("Expected node to compare as boolean");
+            let left_val = get_eval_value(vars, left_val, scope, false);
+
+            let (right_val, _) = eval_node(vars, functions, structs, scope, right.as_ref(), stdout);
+            let right_val = right_val.expect("Expected node to compare as boolean");
+            let right_val = get_eval_value(vars, right_val, scope, false);
+
+            if let Value::Bool(b1) = left_val {
+                if let Value::Bool(b2) = right_val {
+                    let res = match comparison {
+                        BoolComp::And => b1 && b2,
+                        BoolComp::Or => b1 || b2,
+                    };
+                    (Some(EvalValue::Value(Value::Bool(res))), None)
+                } else {
+                    panic!("Expected boolean for boolean comparison");
+                }
+            } else {
+                panic!("Expected boolean for boolean comparison");
+            }
         }
         AstNode::MakeVar(var_type, name, value) => {
             if let Token::Identifier(ident) = name {

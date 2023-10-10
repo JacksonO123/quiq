@@ -656,6 +656,95 @@ pub fn tokens_to_operator<'a>(tokens: &mut Vec<Option<Token>>, start: usize) -> 
     res
 }
 
+pub fn get_bool_exp_node<'a>(
+    structs: &mut StructInfo,
+    tokens: &mut Vec<Option<Token>>,
+) -> Option<AstNode> {
+    let mut left_tokens = vec![];
+    let mut open_brackets = 0;
+
+    let mut i = 0;
+    while i < tokens.len() {
+        match tokens[i].as_ref().unwrap() {
+            Token::LParen => {
+                open_brackets += 1;
+            }
+            Token::RParen => {
+                open_brackets -= 1;
+            }
+            Token::LBrace => {
+                open_brackets += 1;
+            }
+            Token::RBrace => {
+                open_brackets -= 1;
+            }
+            Token::LBracket => {
+                open_brackets += 1;
+            }
+            Token::RBracket => {
+                open_brackets -= 1;
+            }
+            _ => {}
+        }
+
+        if open_brackets == 0 {
+            if match tokens[i].as_ref().unwrap() {
+                Token::BoolComp(_) => true,
+                _ => false,
+            } {
+                let mut right_tokens = vec![];
+
+                for j in i + 1..tokens.len() {
+                    right_tokens.push(tokens[j].take());
+                }
+
+                let left = get_ast_node(structs, &mut left_tokens).unwrap();
+                let right = get_ast_node(structs, &mut right_tokens).unwrap();
+                if let Token::BoolComp(comp) = tokens[i].take().unwrap() {
+                    return Some(AstNode::BoolExp(comp, Box::new(left), Box::new(right)));
+                }
+            } else {
+                left_tokens.push(tokens[i].take());
+            }
+        }
+
+        i += 1;
+    }
+
+    None
+}
+
+pub fn is_bool_exp(tokens: &mut Vec<Option<Token>>) -> bool {
+    let mut open_paren = 0;
+
+    let mut i = 0;
+    while i < tokens.len() {
+        if tokens[i].is_none() {
+            i += 1;
+            continue;
+        }
+
+        match tokens[i].as_ref().unwrap() {
+            Token::LParen => open_paren += 1,
+            Token::RParen => open_paren -= 1,
+            Token::LBrace => open_paren += 1,
+            Token::RBrace => open_paren -= 1,
+            Token::LBracket => open_paren += 1,
+            Token::RBracket => open_paren -= 1,
+            Token::BoolComp(_) => {
+                if open_paren == 0 && i > 0 && i < tokens.len() - 1 {
+                    return true;
+                }
+            }
+            _ => {}
+        }
+
+        i += 1;
+    }
+
+    false
+}
+
 pub fn get_exp_node<'a>(
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,

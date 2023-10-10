@@ -1,11 +1,1 @@
-func test1() void {
-  println("here");
-}
-
-func test() void {
-  int b = 3;
-  println(b);
-  test1();
-}
-
-test();
+println(1 < 2 && true);

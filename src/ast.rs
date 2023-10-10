@@ -4,11 +4,11 @@ use crate::{
     helpers::{
         create_arr, create_bang_bool, create_cast_node, create_comp_node, create_func_call_node,
         create_keyword_node, create_make_var_node, create_set_var_node, create_struct_node,
-        get_exp_node, get_struct_access_tokens, get_type_expression, is_exp, is_sequence,
-        tokens_to_delimiter,
+        get_bool_exp_node, get_exp_node, get_struct_access_tokens, get_type_expression,
+        is_bool_exp, is_exp, is_sequence, tokens_to_delimiter,
     },
     interpreter::{CustomFunc, StructInfo, StructProp, VarType},
-    tokenizer::{Keyword, Token},
+    tokenizer::{BoolComp, Keyword, Token},
 };
 
 #[derive(Debug, Clone)]
@@ -193,6 +193,8 @@ pub enum AstNode {
     Return(Box<AstNode>),
     Break,
     Continue,
+    /// comp type, left, right
+    BoolExp(BoolComp, Box<AstNode>, Box<AstNode>),
 }
 
 impl AstNode {
@@ -244,6 +246,10 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
         {
             tokens.remove(tokens.len() - 1);
             tokens.remove(0);
+        }
+
+        if is_bool_exp(tokens) {
+            return get_bool_exp_node(structs, tokens);
         }
 
         if let Some(comp_node) = create_comp_node(structs, tokens) {

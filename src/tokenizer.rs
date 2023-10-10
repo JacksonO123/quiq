@@ -25,6 +25,21 @@ impl OperatorType {
     }
 }
 
+#[derive(Debug, Clone)]
+pub enum BoolComp {
+    And,
+    Or,
+}
+
+impl BoolComp {
+    pub fn get_str(&self) -> &str {
+        match self {
+            BoolComp::And => "&&",
+            BoolComp::Or => "||",
+        }
+    }
+}
+
 #[derive(Clone, Debug)]
 pub enum Keyword {
     If,
@@ -83,6 +98,9 @@ pub enum Token {
     LAngleEq,
     RAngleEq,
     Null,
+    BoolComp(BoolComp),
+    BitwiseAnd,
+    BitwiseOr,
 }
 impl Token {
     pub fn get_str(&self) -> &str {
@@ -121,6 +139,9 @@ impl Token {
             Token::LAngleEq => "<=",
             Token::RAngleEq => ">=",
             Token::Null => "null",
+            Token::BoolComp(comp) => comp.get_str(),
+            Token::BitwiseAnd => "&",
+            Token::BitwiseOr => "|",
         }
     }
     pub fn get_token_name(&self) -> &str {
@@ -301,16 +322,32 @@ pub fn tokenize(code: &str, structs: &mut StructInfo) -> Vec<Option<Token>> {
             token = Token::RBracket;
         } else if chars[i] == '<' {
             token = if i < chars.len() - 1 && chars[i + 1] == '=' {
+                i += 1;
                 Token::LAngleEq
             } else {
                 Token::LAngle
             }
         } else if chars[i] == '>' {
             token = if i < chars.len() - 1 && chars[i + 1] == '=' {
+                i += 1;
                 Token::RAngleEq
             } else {
                 Token::RAngle
             }
+        } else if chars[i] == '&' {
+            token = if i < chars.len() - 1 && chars[i + 1] == '&' {
+                i += 1;
+                Token::BoolComp(BoolComp::And)
+            } else {
+                Token::BitwiseAnd
+            };
+        } else if chars[i] == '|' {
+            token = if i < chars.len() - 1 && chars[i + 1] == '|' {
+                i += 1;
+                Token::BoolComp(BoolComp::Or)
+            } else {
+                Token::BitwiseOr
+            };
         } else if chars[i] == ',' {
             token = Token::Comma;
         } else if chars[i] == '.' {

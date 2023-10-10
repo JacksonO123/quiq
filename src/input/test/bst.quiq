@@ -18,7 +18,6 @@ struct BstAddParams {
 struct Bst {
   root: union<BstNode, null>;
   add: fn<BstAddParams, void>;
-  val: int;
 }
 
 func createBstNode(int val) BstNode {
@@ -47,7 +46,6 @@ func createBstNode(int val) BstNode {
 func createBst() Bst {
   return <Bst>{
     root: null,
-    val: 1,
     add: func (ref<Bst> self, int val) void {
       if (self.root == null) {
         self.root = createBstNode(val);
@@ -60,7 +58,7 @@ func createBst() Bst {
 
 Bst a = createBst();
 
-for (i; 0; 700) {
+for (i; 0; 10) {
   a.add(i);
 }
 
