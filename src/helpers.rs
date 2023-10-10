@@ -1214,14 +1214,14 @@ pub fn create_cast_node<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<To
     let node_option = get_ast_node(structs, &mut node_tokens);
 
     let to_type = match tokens[0].as_ref().unwrap() {
-        Token::Type(t) => t.get_str(),
+        Token::Type(t) => t,
         _ => panic!("Cannot cast to: {:?}", tokens[0].as_ref().unwrap()),
     };
 
     if let Some(node) = node_option {
-        AstNode::Cast(VarType::from(to_type), Box::new(node))
+        AstNode::Cast(to_type.clone(), Box::new(node))
     } else {
-        panic!("")
+        panic!("Expected node to cast");
     }
 }
 

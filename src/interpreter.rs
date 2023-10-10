@@ -194,18 +194,6 @@ pub enum VarType {
     Union(Vec<VarType>),
 }
 impl VarType {
-    pub fn from(string: &str) -> Self {
-        match string {
-            "int" => VarType::Int,
-            "float" => VarType::Float,
-            "double" => VarType::Double,
-            "long" => VarType::Long,
-            "string" => VarType::String,
-            "bool" => VarType::Bool,
-            "usize" => VarType::Usize,
-            _ => panic!("Unable to infer var type from: {}", string),
-        }
-    }
     pub fn get_str(&self) -> &str {
         match self {
             VarType::Ref(_) => "ref",
