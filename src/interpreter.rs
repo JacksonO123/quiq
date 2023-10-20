@@ -814,7 +814,7 @@ pub fn eval_node<'a>(
             let res_option = eval_node(vars, functions, structs, scope, node.as_ref(), stdout);
 
             if let (Some(eval_value), _) = res_option {
-                let val = get_eval_value(vars, eval_value, scope, true);
+                let val = get_eval_value(vars, eval_value, scope, false);
                 let casted_value = cast(var_type, val);
                 (Some(EvalValue::Value(casted_value)), None)
             } else {
