@@ -12,13 +12,36 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
+pub struct Generic {
+    pub name: String,
+}
+
+impl Generic {
+    pub fn new(name: String) -> Self {
+        Self { name }
+    }
+}
+
+#[derive(Debug, Clone)]
 pub struct StructShape {
     pub props: HashMap<String, VarType>,
+    pub generic_template: Vec<String>,
+    pub generics: HashMap<String, VarType>,
 }
+
 impl StructShape {
     pub fn new() -> Self {
         Self {
             props: HashMap::new(),
+            generic_template: vec![],
+            generics: HashMap::new(),
+        }
+    }
+    pub fn new_with_generics(generics: Vec<String>) -> Self {
+        Self {
+            props: HashMap::new(),
+            generic_template: generics,
+            generics: HashMap::new(),
         }
     }
     pub fn add(&mut self, name: String, prop_type: VarType) {
@@ -272,18 +295,30 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
                 match tokens[0].as_ref().unwrap() {
                     Token::LBracket => Some(create_arr(structs, tokens, type_val)),
                     Token::LBrace => {
-                        if type_tokens.len() != 1 {
-                            panic!("Type of struct can only be a struct type name");
-                        }
-
                         if let Token::Identifier(ident) = first_token {
                             match structs.available_structs.get(&ident) {
-                                Some(shape) => Some(create_struct_node(
-                                    tokens,
-                                    structs,
-                                    Rc::clone(shape),
-                                    &ident.clone(),
-                                )),
+                                Some(shape) => {
+                                    let mut local_shape = {
+                                        let temp_borrow = shape.borrow();
+                                        temp_borrow.clone()
+                                    };
+                                    if let VarType::Struct(_, gen_types) = type_val {
+                                        for (i, generic_name) in
+                                            local_shape.generic_template.iter().enumerate()
+                                        {
+                                            local_shape
+                                                .generics
+                                                .insert(generic_name.clone(), gen_types[i].clone());
+                                        }
+                                    }
+
+                                    Some(create_struct_node(
+                                        tokens,
+                                        structs,
+                                        Rc::new(RefCell::new(local_shape)),
+                                        &ident.clone(),
+                                    ))
+                                }
                                 None => panic!("Struct {} does not exist", ident),
                             }
                         } else {
@@ -300,7 +335,13 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
             Token::Identifier(ident) => match tokens[1].as_ref().unwrap() {
                 Token::LParen => Some(create_func_call_node(structs, tokens)),
                 Token::EqSet => Some(create_set_var_node(structs, tokens)),
-                Token::LAngle => Some(create_make_var_node(structs, tokens, false)),
+                Token::LAngle => {
+                    if structs.available_structs.contains_key(ident) {
+                        Some(create_make_var_node(structs, tokens, true))
+                    } else {
+                        Some(create_make_var_node(structs, tokens, false))
+                    }
+                }
                 Token::Period => {
                     let struct_token = tokens[0].take().unwrap();
                     tokens.remove(0);

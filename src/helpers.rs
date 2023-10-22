@@ -99,7 +99,7 @@ pub fn create_make_var_node<'a>(
     } else {
         if is_struct {
             if let Token::Identifier(ident) = first_token {
-                VarType::Struct(ident.clone())
+                VarType::Struct(ident.clone(), vec![])
             } else {
                 panic!("Expected identifier for variable name");
             }
@@ -120,20 +120,19 @@ pub fn create_make_var_node<'a>(
         }
     };
 
-    let mut i = 0;
-    if let Token::LAngle = tokens[1].as_ref().unwrap() {
-        i += 2;
-        while match tokens[i].as_ref() {
-            Some(v) => match v {
-                Token::RAngle => false,
-                _ => true,
-            },
-            None => true,
-        } {
-            i += 1;
-        }
+    let mut generic_tokens = if let Token::LAngle = tokens[1].as_ref().unwrap() {
+        tokens_to_delimiter(tokens, 2, ">")
+    } else {
+        vec![]
+    };
+
+    let generic_types = generic_types_from_tokens(&mut generic_tokens, structs);
+
+    if let VarType::Struct(_, ref mut generics) = &mut var_type {
+        *generics = generic_types;
     }
 
+    let mut i = generic_tokens.len() + 3;
     while match tokens[i + 1].as_ref().unwrap() {
         Token::LBracket => true,
         _ => false,
@@ -171,6 +170,22 @@ pub fn create_make_var_node<'a>(
 
     let len = tokens.len();
     return AstNode::MakeVar(var_type, tokens[len - 2].take().unwrap(), None);
+}
+
+pub fn generic_types_from_tokens(
+    tokens: &mut Vec<Option<Token>>,
+    structs: &mut StructInfo,
+) -> Vec<VarType> {
+    let mut generic_types = vec![];
+    let mut type_offset = 0;
+    let mut temp_tokens = tokens_to_delimiter(tokens, type_offset, ",");
+    while temp_tokens.len() > 0 {
+        let generic_type = get_type_expression(&mut temp_tokens, structs);
+        generic_types.push(generic_type);
+        type_offset += temp_tokens.len() + 1;
+        temp_tokens = tokens_to_delimiter(tokens, type_offset, ",");
+    }
+    generic_types
 }
 
 pub fn create_set_var_node<'a>(
@@ -287,13 +302,16 @@ pub fn create_keyword_node<'a>(
             Some(AstNode::While(exp_node, Box::new(block_node)))
         }
         Keyword::Struct => {
-            // [struct, name, {]
+            // println!("{:?}", tokens);
+            // [struct, name, <?, T?, ...?, >?, {]
             let name_option = tokens[1].take().unwrap().clone();
 
-            let mut shape_tokens = tokens_to_delimiter(tokens, 2, "}");
+            let mut generic_tokens = tokens_to_delimiter(tokens, 2, "{");
+            let generics = get_generics(&mut generic_tokens);
+            let mut shape_tokens = tokens_to_delimiter(tokens, 3 + generic_tokens.len(), "}");
 
             if let Token::Identifier(ident) = name_option {
-                let shape = create_struct_shape(&mut shape_tokens, structs);
+                let shape = create_struct_shape(&mut shape_tokens, structs, &generics);
                 let temp_shape = structs.available_structs.get_mut(&ident).unwrap();
                 *temp_shape.borrow_mut() = shape;
                 None
@@ -342,11 +360,34 @@ pub fn create_keyword_node<'a>(
     }
 }
 
+fn get_generics(tokens: &mut Vec<Option<Token>>) -> Vec<String> {
+    let mut offset = 1;
+    let mut generic_tokens = tokens_to_delimiter(tokens, offset, ",");
+    let mut res = vec![];
+
+    while generic_tokens.len() > 0 {
+        let temp = generic_tokens.last().unwrap();
+        if let Some(Token::RAngle) = &temp {
+            generic_tokens.pop();
+        }
+
+        if let Some(Token::Identifier(ident)) = generic_tokens[0].take() {
+            res.push(ident);
+        }
+
+        offset += generic_tokens.len() + 1;
+        generic_tokens = tokens_to_delimiter(tokens, offset, ",");
+    }
+
+    res
+}
+
 fn create_struct_shape<'a>(
     shape: &mut Vec<Option<Token>>,
     structs: &mut StructInfo,
+    generics: &Vec<String>,
 ) -> StructShape {
-    let mut struct_shape = StructShape::new();
+    let mut struct_shape = StructShape::new_with_generics(generics.clone());
     let mut offset = 1;
     while offset < shape.len() {
         let mut prop = tokens_to_delimiter(shape, offset, ";");
@@ -370,7 +411,13 @@ fn create_struct_shape<'a>(
                 let mut prop_type = match prop[2].clone().as_ref().unwrap() {
                     Token::Type(t) => t.clone(),
                     Token::Identifier(val) => match structs.available_structs.get(val) {
-                        Some(_) => VarType::Struct(val.clone()),
+                        Some(_) => VarType::Struct(
+                            val.clone(),
+                            generics
+                                .iter()
+                                .map(|s| VarType::Generic(s.clone()))
+                                .collect(),
+                        ),
                         None => {
                             let mut clone_tokens: Vec<Option<Token>> =
                                 prop.clone().drain(2..).collect();
@@ -378,7 +425,17 @@ fn create_struct_shape<'a>(
                                 temp_offset = clone_tokens.len() - 1;
                                 t
                             } else {
-                                panic!("Unexpected struct type name {}", val)
+                                let mut res: Option<VarType> = None;
+                                for generic in generics.iter() {
+                                    if generic == val {
+                                        res = Some(VarType::Generic(generic.clone()));
+                                    }
+                                }
+
+                                match res {
+                                    Some(v) => v,
+                                    None => panic!("Unexpected struct type name {}", val),
+                                }
                             }
                         }
                     },
@@ -894,7 +951,21 @@ pub fn get_type_expression(tokens: &mut Vec<Option<Token>>, structs: &mut Struct
     } else {
         match first_token {
             Token::Identifier(ident) => match structs.available_structs.get(&ident) {
-                Some(_) => VarType::Struct(ident.clone()),
+                // bring generic type thing from make var node to function and use it here
+                Some(_) => {
+                    let generics = if tokens.len() > 1 {
+                        if let Token::LAngle = tokens[1].as_ref().unwrap() {
+                            let mut generics_tokens = tokens_to_delimiter(tokens, 2, ">");
+                            generic_types_from_tokens(&mut generics_tokens, structs)
+                        } else {
+                            vec![]
+                        }
+                    } else {
+                        vec![]
+                    };
+
+                    VarType::Struct(ident.clone(), generics)
+                }
                 None => {
                     let generic_type = get_builtin_generic(&ident, structs, tokens);
                     generic_type.expect("Expected type or struct name for type expression")
@@ -997,8 +1068,8 @@ pub fn compare_types(structs: &mut StructInfo, type1: &VarType, type2: &VarType)
             VarType::Ref(r2) => compare_types(structs, r1.as_ref(), r2.as_ref()),
             _ => false,
         },
-        VarType::Struct(name1) => match type2 {
-            VarType::Struct(name2) => name1 == name2,
+        VarType::Struct(name1, _) => match type2 {
+            VarType::Struct(name2, _) => name1 == name2,
             VarType::StructShape(shape1) => {
                 let shape2 = structs.available_structs.get(name1).unwrap();
                 let shape2 = shape2.clone();
@@ -1024,6 +1095,7 @@ pub fn compare_types(structs: &mut StructInfo, type1: &VarType, type2: &VarType)
             _ => false,
         },
         VarType::Union(types) => in_union(structs, types, type2),
+        VarType::Generic(_) => panic!("Cannot compare generic types"),
     }
 }
 
@@ -1195,7 +1267,16 @@ pub fn type_from_value(val: &Value) -> VarType {
         Value::Double(_) => VarType::Double,
         Value::Long(_) => VarType::Long,
         Value::Bool(_) => VarType::Bool,
-        Value::Struct(name, _, _) => VarType::Struct(name.clone()),
+        Value::Struct(name, shape, _) => {
+            let mut generic_types = vec![];
+            let shape_borrow = shape.borrow();
+            for generic_name in shape_borrow.generic_template.iter() {
+                let generic_type = shape_borrow.generics.get(generic_name).unwrap();
+                generic_types.push(generic_type.clone());
+            }
+
+            VarType::Struct(name.clone(), generic_types)
+        }
         Value::Array(_, arr_type) => VarType::Array(Box::new(arr_type.clone())),
         Value::Fn(func) => {
             let return_type = func.borrow().return_type.clone();
@@ -1253,12 +1334,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("usize", "array"),
-            VarType::Struct(_) => cast_panic!("usize", "struct"),
+            VarType::Struct(_, _) => cast_panic!("usize", "struct"),
             VarType::Null => cast_panic!("usize", "null"),
             VarType::Ref(_) => cast_panic!("usize", "ref"),
             VarType::Void => cast_panic!("usize", "void"),
             VarType::Fn(_, _) => cast_panic!("usize", "fn"),
             VarType::Union(_) => cast_panic!("usize", "union"),
+            VarType::Generic(g) => cast_panic!("usize", g),
             VarType::StructShape(_) => unreachable!(),
         },
         Value::String(v) => match to_type {
@@ -1276,12 +1358,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::String => Value::String(v),
             VarType::Bool => Value::Bool(v.parse::<bool>().expect("Error parsing string to bool")),
             VarType::Array(_) => cast_panic!("string", "array"),
-            VarType::Struct(_) => cast_panic!("string", "struct"),
+            VarType::Struct(_, _) => cast_panic!("string", "struct"),
             VarType::Null => cast_panic!("string", "null"),
             VarType::Ref(_) => cast_panic!("string", "ref"),
             VarType::Void => cast_panic!("string", "void"),
             VarType::Fn(_, _) => cast_panic!("string", "fn"),
             VarType::Union(_) => cast_panic!("string", "union"),
+            VarType::Generic(g) => cast_panic!("string", g),
             VarType::StructShape(_) => unreachable!(),
         },
         Value::Int(v) => match to_type {
@@ -1301,12 +1384,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("int", "array"),
-            VarType::Struct(_) => cast_panic!("int", "struct"),
+            VarType::Struct(_, _) => cast_panic!("int", "struct"),
             VarType::Null => cast_panic!("int", "null"),
             VarType::Ref(_) => cast_panic!("int", "ref"),
             VarType::Void => cast_panic!("int", "void"),
             VarType::Fn(_, _) => cast_panic!("int", "fn"),
             VarType::Union(_) => cast_panic!("int", "union"),
+            VarType::Generic(g) => cast_panic!("int", g),
             VarType::StructShape(_) => unreachable!(),
         },
         Value::Float(v) => match to_type {
@@ -1326,12 +1410,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("float", "array"),
-            VarType::Struct(_) => cast_panic!("float", "struct"),
+            VarType::Struct(_, _) => cast_panic!("float", "struct"),
             VarType::Null => cast_panic!("float", "null"),
             VarType::Ref(_) => cast_panic!("float", "ref"),
             VarType::Void => cast_panic!("float", "void"),
             VarType::Fn(_, _) => cast_panic!("float", "fn"),
             VarType::Union(_) => cast_panic!("float", "union"),
+            VarType::Generic(g) => cast_panic!("float", g),
             VarType::StructShape(_) => unreachable!(),
         },
         Value::Double(v) => match to_type {
@@ -1351,12 +1436,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("double", "array"),
-            VarType::Struct(_) => cast_panic!("double", "struct"),
+            VarType::Struct(_, _) => cast_panic!("double", "struct"),
             VarType::Null => cast_panic!("double", "null"),
             VarType::Ref(_) => cast_panic!("double", "ref"),
             VarType::Void => cast_panic!("double", "void"),
             VarType::Fn(_, _) => cast_panic!("double", "fn"),
             VarType::Union(_) => cast_panic!("double", "union"),
+            VarType::Generic(g) => cast_panic!("double", g),
             VarType::StructShape(_) => unreachable!(),
         },
         Value::Long(v) => match to_type {
@@ -1376,12 +1462,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 }
             }
             VarType::Array(_) => cast_panic!("long", "array"),
-            VarType::Struct(_) => cast_panic!("long", "struct"),
+            VarType::Struct(_, _) => cast_panic!("long", "struct"),
             VarType::Null => cast_panic!("long", "null"),
             VarType::Ref(_) => cast_panic!("long", "ref"),
             VarType::Void => cast_panic!("long", "void"),
             VarType::Fn(_, _) => cast_panic!("long", "fn"),
             VarType::Union(_) => cast_panic!("long", "union"),
+            VarType::Generic(g) => cast_panic!("long", g),
             VarType::StructShape(_) => unreachable!(),
         },
         Value::Bool(v) => {
@@ -1395,12 +1482,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
                 VarType::String => Value::String(v.to_string()),
                 VarType::Bool => val,
                 VarType::Array(_) => cast_panic!("bool", "array"),
-                VarType::Struct(_) => cast_panic!("bool", "struct"),
+                VarType::Struct(_, _) => cast_panic!("bool", "struct"),
                 VarType::Null => cast_panic!("bool", "null"),
                 VarType::Ref(_) => cast_panic!("bool", "ref"),
                 VarType::Void => cast_panic!("bool", "void"),
                 VarType::Fn(_, _) => cast_panic!("bool", "fn"),
                 VarType::Union(_) => cast_panic!("bool", "union"),
+                VarType::Generic(g) => cast_panic!("bool", g),
                 VarType::StructShape(_) => unreachable!(),
             }
         }
@@ -1413,12 +1501,13 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
             VarType::String => Value::String(get_value_arr_str(&arr)),
             VarType::Bool => cast_panic!("array", "bool"),
             VarType::Array(_) => unimplemented!(),
-            VarType::Struct(_) => cast_panic!("array", "struct"),
+            VarType::Struct(_, _) => cast_panic!("array", "struct"),
             VarType::Null => cast_panic!("array", "null"),
             VarType::Ref(_) => cast_panic!("array", "ref"),
             VarType::Void => cast_panic!("array", "void"),
             VarType::Fn(_, _) => cast_panic!("array", "fn"),
             VarType::Union(_) => cast_panic!("array", "union"),
+            VarType::Generic(g) => cast_panic!("array", g),
             VarType::StructShape(_) => unreachable!(),
         },
         Value::Struct(_, _, _) => panic!("Cannot cast structs"),
@@ -1537,6 +1626,30 @@ pub fn create_comp_node<'a>(
     let mut temp_tokens = vec![];
     let mut open_parens = 0;
 
+    {
+        // check for generics or braces
+        let mut has_left_angle = false;
+        for i in 0..tokens.len() {
+            match tokens[i].as_ref().unwrap() {
+                Token::LParen => open_parens += 1,
+                Token::RParen => open_parens -= 1,
+                Token::LBracket => open_parens += 1,
+                Token::RBracket => open_parens -= 1,
+                Token::LBrace => return None,
+                Token::RBrace => return None,
+                Token::LAngle => {
+                    has_left_angle = true;
+                }
+                Token::RAngle => {
+                    if has_left_angle {
+                        return None;
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
     for i in 0..tokens.len() {
         match tokens[i].as_ref().unwrap() {
             Token::LParen => open_parens += 1,
@@ -1545,6 +1658,7 @@ pub fn create_comp_node<'a>(
             Token::RBracket => open_parens -= 1,
             Token::LBrace => open_parens += 1,
             Token::RBrace => open_parens -= 1,
+            Token::Keyword(Keyword::Struct) => return None,
             _ => {}
         }
 
@@ -1957,7 +2071,8 @@ fn get_builtin_generic(
                 Token::Identifier(ident) => {
                     let struct_info = structs.available_structs.get(ident.as_str());
                     if let Some(_) = struct_info {
-                        VarType::Struct(ident.clone())
+                        // TODO
+                        VarType::Struct(ident.clone(), vec![])
                     } else {
                         panic!("Unexpected type {}", ident);
                     }
@@ -1984,7 +2099,8 @@ fn get_builtin_generic(
             let param_type = if let Token::Identifier(ident) = param_tokens[0].as_ref().unwrap() {
                 let struct_info = structs.available_structs.get(ident.as_str());
                 if let Some(_) = struct_info {
-                    VarType::Struct(ident.clone())
+                    // TODO
+                    VarType::Struct(ident.clone(), vec![])
                 } else {
                     panic!("Unexpected type {}", ident);
                 }

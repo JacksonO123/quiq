@@ -183,8 +183,8 @@ pub enum VarType {
     String,
     Bool,
     Array(Box<VarType>),
-    /// struct type name, shape
-    Struct(String),
+    /// struct type name, generics
+    Struct(String, Vec<VarType>),
     StructShape(StructShape),
     Null,
     Ref(Box<VarType>),
@@ -192,6 +192,7 @@ pub enum VarType {
     /// param struct shape, return type
     Fn(Box<VarType>, Box<VarType>),
     Union(Vec<VarType>),
+    Generic(String),
 }
 impl VarType {
     pub fn get_str(&self) -> &str {
@@ -205,12 +206,13 @@ impl VarType {
             VarType::String => "string",
             VarType::Bool => "bool",
             VarType::Array(_) => "arr",
-            VarType::Struct(_) => "struct",
+            VarType::Struct(_, _) => "struct",
             VarType::Null => "null",
             VarType::Void => "void",
             VarType::Fn(_, _) => "fn",
             VarType::Union(_) => "union",
             VarType::StructShape(_) => "struct shape",
+            VarType::Generic(g) => g.as_str(),
         }
     }
 }
@@ -604,6 +606,12 @@ pub fn eval_node<'a>(
                     let val_type_option = shape_borrow.props.get(prop_name);
                     if let Some(val_type) = val_type_option {
                         let value_type = type_from_value(&value);
+                        let val_type = if let VarType::Generic(g) = val_type {
+                            shape_borrow.generics.get(g).unwrap()
+                        } else {
+                            val_type
+                        };
+
                         if !compare_types(structs, val_type, &value_type) {
                             panic!(
                                 "Type mismatch in struct creation. Expected {:?} found {:?}",

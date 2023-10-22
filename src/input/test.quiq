@@ -1,3 +1,9 @@
-double a = 2.1;
-int b = int(a);
-println(b);
+struct Test<T> {
+  val: T
+}
+
+Test<int> test = <Test<int>>{
+  val: 10
+};
+
+println(test.val);
