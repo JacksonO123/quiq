@@ -1,9 +1,11 @@
-struct Test<T> {
-  val: T
+struct Test<T, K> {
+  v1: T;
+  v2: K;
 }
 
-Test<int> test = <Test<int>>{
-  val: 10
+Test<int, bool> test = <Test<int, bool>>{
+  v1: 10,
+  v2: false
 };
 
-println(test.val);
+println(test);

@@ -12,17 +12,6 @@ use crate::{
 };
 
 #[derive(Debug, Clone)]
-pub struct Generic {
-    pub name: String,
-}
-
-impl Generic {
-    pub fn new(name: String) -> Self {
-        Self { name }
-    }
-}
-
-#[derive(Debug, Clone)]
 pub struct StructShape {
     pub props: HashMap<String, VarType>,
     pub generic_template: Vec<String>,
@@ -288,7 +277,7 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
             Token::LAngle => {
                 let first_token = tokens[1].as_ref().unwrap().clone();
                 let mut type_tokens = tokens_to_delimiter(tokens, 1, ">");
-                let type_val = get_type_expression(&mut type_tokens, structs);
+                let type_val = get_type_expression(&mut type_tokens, structs, &vec![]);
 
                 tokens.drain(0..type_tokens.len() + 2);
 

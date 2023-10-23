@@ -109,7 +109,7 @@ pub fn create_make_var_node<'a>(
                 _ => None,
             };
             if let Some(n) = name {
-                if let Some(t) = get_builtin_generic(&n, structs, tokens) {
+                if let Some(t) = get_builtin_generic(&n, structs, tokens, &vec![]) {
                     t
                 } else {
                     panic!("Type {} is not generic", n);
@@ -121,20 +121,24 @@ pub fn create_make_var_node<'a>(
     };
 
     let mut generic_tokens = if let Token::LAngle = tokens[1].as_ref().unwrap() {
-        tokens_to_delimiter(tokens, 2, ">")
+        if tokens[2].as_ref().is_some() {
+            tokens_to_delimiter(tokens, 2, ">")
+        } else {
+            vec![]
+        }
     } else {
         vec![]
     };
 
-    let generic_types = generic_types_from_tokens(&mut generic_tokens, structs);
+    let generic_types = generic_types_from_tokens(&mut generic_tokens, structs, &vec![]);
 
     if let VarType::Struct(_, ref mut generics) = &mut var_type {
         *generics = generic_types;
     }
 
     let mut i = generic_tokens.len() + 3;
-    while match tokens[i + 1].as_ref().unwrap() {
-        Token::LBracket => true,
+    while match tokens[i + 1].as_ref() {
+        Some(Token::LBracket) => true,
         _ => false,
     } {
         var_type = VarType::Array(Box::new(var_type));
@@ -175,12 +179,13 @@ pub fn create_make_var_node<'a>(
 pub fn generic_types_from_tokens(
     tokens: &mut Vec<Option<Token>>,
     structs: &mut StructInfo,
+    allowed_generics: &Vec<String>,
 ) -> Vec<VarType> {
     let mut generic_types = vec![];
     let mut type_offset = 0;
     let mut temp_tokens = tokens_to_delimiter(tokens, type_offset, ",");
     while temp_tokens.len() > 0 {
-        let generic_type = get_type_expression(&mut temp_tokens, structs);
+        let generic_type = get_type_expression(&mut temp_tokens, structs, allowed_generics);
         generic_types.push(generic_type);
         type_offset += temp_tokens.len() + 1;
         temp_tokens = tokens_to_delimiter(tokens, type_offset, ",");
@@ -302,7 +307,6 @@ pub fn create_keyword_node<'a>(
             Some(AstNode::While(exp_node, Box::new(block_node)))
         }
         Keyword::Struct => {
-            // println!("{:?}", tokens);
             // [struct, name, <?, T?, ...?, >?, {]
             let name_option = tokens[1].take().unwrap().clone();
 
@@ -335,7 +339,7 @@ pub fn create_keyword_node<'a>(
                 panic!("Expected return type for function");
             }
 
-            let return_type = get_type_expression(&mut return_type_tokens, structs);
+            let return_type = get_type_expression(&mut return_type_tokens, structs, &vec![]);
             let num = 6 - offset * 2 + param_tokens.len() + return_type_tokens.len();
             let mut block_tokens = tokens_to_delimiter(tokens, num, "}");
             let block_node = get_ast_node(structs, &mut block_tokens)
@@ -406,56 +410,8 @@ fn create_struct_shape<'a>(
         match prop[0].as_ref().unwrap() {
             Token::RBrace => break,
             _ => {
-                let mut temp_offset = 0;
-
-                let mut prop_type = match prop[2].clone().as_ref().unwrap() {
-                    Token::Type(t) => t.clone(),
-                    Token::Identifier(val) => match structs.available_structs.get(val) {
-                        Some(_) => VarType::Struct(
-                            val.clone(),
-                            generics
-                                .iter()
-                                .map(|s| VarType::Generic(s.clone()))
-                                .collect(),
-                        ),
-                        None => {
-                            let mut clone_tokens: Vec<Option<Token>> =
-                                prop.clone().drain(2..).collect();
-                            if let Some(t) = get_builtin_generic(val, structs, &mut clone_tokens) {
-                                temp_offset = clone_tokens.len() - 1;
-                                t
-                            } else {
-                                let mut res: Option<VarType> = None;
-                                for generic in generics.iter() {
-                                    if generic == val {
-                                        res = Some(VarType::Generic(generic.clone()));
-                                    }
-                                }
-
-                                match res {
-                                    Some(v) => v,
-                                    None => panic!("Unexpected struct type name {}", val),
-                                }
-                            }
-                        }
-                    },
-                    _ => panic!("Expected type or identifier for struct property type"),
-                };
-
-                let mut array_offset = 3 + temp_offset;
-                while array_offset < prop.len() - 1
-                    && match prop[array_offset].as_ref().unwrap() {
-                        Token::LBracket => true,
-                        Token::Semicolon => false,
-                        _ => panic!(
-                            "Unexpected token: {:?}",
-                            prop[array_offset].as_ref().unwrap()
-                        ),
-                    }
-                {
-                    prop_type = VarType::Array(Box::new(prop_type));
-                    array_offset += 2;
-                }
+                let mut prop_type_tokens = tokens_to_delimiter(&mut prop, 2, ";");
+                let prop_type = get_type_expression(&mut prop_type_tokens, structs, generics);
 
                 if let Token::Identifier(ident) = prop[0].take().unwrap() {
                     struct_shape.add(ident, prop_type);
@@ -482,7 +438,7 @@ pub fn get_param_definitions(
         let mut param_definition = tokens_to_delimiter(tokens, i, ",");
         i += param_definition.len() + 1;
         let name_option = param_definition.remove(param_definition.len() - 1);
-        let param_type = get_type_expression(&mut param_definition, structs);
+        let param_type = get_type_expression(&mut param_definition, structs, &vec![]);
         if let Token::Identifier(name) = name_option.unwrap() {
             let param = FuncParam::new(name, param_type);
             res.push(param);
@@ -944,19 +900,26 @@ pub fn create_bang_bool<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<To
     }
 }
 
-pub fn get_type_expression(tokens: &mut Vec<Option<Token>>, structs: &mut StructInfo) -> VarType {
+pub fn get_type_expression(
+    tokens: &mut Vec<Option<Token>>,
+    structs: &mut StructInfo,
+    allowed_generics: &Vec<String>,
+) -> VarType {
     let first_token = tokens[0].take().unwrap();
     let first_type = if let Token::Type(t) = first_token {
         t
     } else {
         match first_token {
             Token::Identifier(ident) => match structs.available_structs.get(&ident) {
-                // bring generic type thing from make var node to function and use it here
                 Some(_) => {
                     let generics = if tokens.len() > 1 {
                         if let Token::LAngle = tokens[1].as_ref().unwrap() {
                             let mut generics_tokens = tokens_to_delimiter(tokens, 2, ">");
-                            generic_types_from_tokens(&mut generics_tokens, structs)
+                            generic_types_from_tokens(
+                                &mut generics_tokens,
+                                structs,
+                                allowed_generics,
+                            )
                         } else {
                             vec![]
                         }
@@ -967,8 +930,17 @@ pub fn get_type_expression(tokens: &mut Vec<Option<Token>>, structs: &mut Struct
                     VarType::Struct(ident.clone(), generics)
                 }
                 None => {
-                    let generic_type = get_builtin_generic(&ident, structs, tokens);
-                    generic_type.expect("Expected type or struct name for type expression")
+                    let generic_type =
+                        get_builtin_generic(&ident, structs, tokens, allowed_generics);
+                    if let Some(t) = generic_type {
+                        t
+                    } else {
+                        if allowed_generics.contains(&ident) {
+                            VarType::Generic(ident)
+                        } else {
+                            panic!("Expected type or struct name for type expression")
+                        }
+                    }
                 }
             },
             Token::Null => VarType::Null,
@@ -2062,54 +2034,21 @@ fn get_builtin_generic(
     name: &String,
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
+    allowed_generics: &Vec<String>,
 ) -> Option<VarType> {
     match name.as_str() {
         "ref" => {
-            let type_tokens = tokens_to_delimiter(tokens, 2, ">");
-            let mut generic_type = match type_tokens[0].as_ref().unwrap() {
-                Token::Type(t) => t.clone(),
-                Token::Identifier(ident) => {
-                    let struct_info = structs.available_structs.get(ident.as_str());
-                    if let Some(_) = struct_info {
-                        // TODO
-                        VarType::Struct(ident.clone(), vec![])
-                    } else {
-                        panic!("Unexpected type {}", ident);
-                    }
-                }
-                _ => panic!("Expected valid type for generic"),
-            };
-
-            let mut i = 0;
-            while i < type_tokens.len() - 1
-                && match type_tokens[i + 1].as_ref().unwrap() {
-                    Token::LBracket => true,
-                    _ => false,
-                }
-            {
-                generic_type = VarType::Array(Box::new(generic_type));
-
-                i += 2;
-            }
+            let mut type_tokens = tokens_to_delimiter(tokens, 2, ">");
+            let generic_type = get_type_expression(&mut type_tokens, structs, allowed_generics);
 
             Some(VarType::Ref(Box::new(generic_type)))
         }
         "fn" => {
-            let param_tokens = tokens_to_delimiter(tokens, 2, ",");
-            let param_type = if let Token::Identifier(ident) = param_tokens[0].as_ref().unwrap() {
-                let struct_info = structs.available_structs.get(ident.as_str());
-                if let Some(_) = struct_info {
-                    // TODO
-                    VarType::Struct(ident.clone(), vec![])
-                } else {
-                    panic!("Unexpected type {}", ident);
-                }
-            } else {
-                panic!("Expected struct ident for param type");
-            };
+            let mut param_tokens = tokens_to_delimiter(tokens, 2, ",");
+            let param_type = get_type_expression(&mut param_tokens, structs, allowed_generics);
 
             let mut return_tokens = tokens_to_delimiter(tokens, 3 + param_tokens.len(), ">");
-            let return_type = get_type_expression(&mut return_tokens, structs);
+            let return_type = get_type_expression(&mut return_tokens, structs, allowed_generics);
 
             Some(VarType::Fn(Box::new(param_type), Box::new(return_type)))
         }
@@ -2118,7 +2057,7 @@ fn get_builtin_generic(
 
             let mut type_tokens = tokens_to_delimiter(tokens, 2, ">");
             let mut first_tokens = tokens_to_delimiter(&mut type_tokens, 0, ",");
-            let first_type = get_type_expression(&mut first_tokens, structs);
+            let first_type = get_type_expression(&mut first_tokens, structs, allowed_generics);
             union.push(first_type);
 
             let mut offset = first_tokens.len() + 1;
@@ -2131,7 +2070,7 @@ fn get_builtin_generic(
                     break;
                 }
 
-                let type_node = get_type_expression(&mut other_type, structs);
+                let type_node = get_type_expression(&mut other_type, structs, allowed_generics);
                 union.push(type_node);
             }
 

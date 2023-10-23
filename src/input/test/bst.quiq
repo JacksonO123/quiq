@@ -1,31 +1,31 @@
-struct BstNodeAddParams {
-  self: ref<BstNode>;
+struct BstNodeAddParams<T> {
+  self: ref<BstNode<T>>;
   val: int;
 }
 
-struct BstNode {
-  left: union<ref<BstNode>, null>;
-  right: union<ref<BstNode>, null>;
+struct BstNode<T> {
+  left: union<ref<BstNode<T>>, null>;
+  right: union<ref<BstNode<T>>, null>;
   add: fn<BstNodeAddParams, void>;
-  value: int;
+  value: T;
 }
 
-struct BstAddParams {
-  self: ref<Bst>;
+struct BstAddParams<T> {
+  self: ref<Bst<T>>;
   val: int;
 }
 
-struct Bst {
-  root: union<BstNode, null>;
-  add: fn<BstAddParams, void>;
+struct Bst<T> {
+  root: union<BstNode<T>, null>;
+  add: fn<BstAddParams<T>, void>;
 }
 
-func createBstNode(int val) BstNode {
-  return <BstNode>{
+func createBstNode(int val) BstNode<int> {
+  return <BstNode<int>>{
     left: null,
     right: null,
     value: val,
-    add: func (ref<BstNode> self, int val) void {
+    add: func (ref<BstNode<int>> self, int val) void {
       if (val < clone(self.value)) {
         if (self.left == null) {
           self.left = ref(createBstNode(val));
@@ -43,10 +43,10 @@ func createBstNode(int val) BstNode {
   }
 }
 
-func createBst() Bst {
-  return <Bst>{
+func createBst() Bst<int> {
+  return <Bst<int>>{
     root: null,
-    add: func (ref<Bst> self, int val) void {
+    add: func (ref<Bst<int>> self, int val) void {
       if (self.root == null) {
         self.root = createBstNode(val);
       } else {
@@ -56,7 +56,7 @@ func createBst() Bst {
   }
 }
 
-Bst a = createBst();
+Bst<int> a = createBst();
 
 for (i; 0; 10) {
   a.add(i);
