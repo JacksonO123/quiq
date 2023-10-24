@@ -1,1 +1,7 @@
-exit();
+int[] a = <int>[];
+
+for (i; 0; 1000) {
+  a.push(i);
+}
+
+println(a);

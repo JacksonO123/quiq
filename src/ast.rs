@@ -46,14 +46,15 @@ pub fn get_value_arr_str(values: &Vec<Value>) -> String {
     if values.len() < size_buffer * 2 {
         for (i, item) in values.iter().enumerate() {
             if i < values.len() - 1 {
-                res.push_str(format!("{}, ", item.get_str()).as_str());
+                let temp = item.get_str() + ", ";
+                res.push_str(&temp);
             } else {
                 res.push_str(item.get_str().as_str());
             }
         }
     } else {
         for i in 0..size_buffer {
-            res.push_str(values[i].get_str().as_str());
+            res.push_str(&values[i].get_str());
             if i < size_buffer - 1 {
                 res.push_str(", ");
             } else {
@@ -62,7 +63,7 @@ pub fn get_value_arr_str(values: &Vec<Value>) -> String {
         }
 
         for i in values.len() - size_buffer..values.len() {
-            res.push_str(values[i].get_str().as_str());
+            res.push_str(&values[i].get_str());
             if i < values.len() - 1 {
                 res.push_str(", ");
             }
@@ -93,7 +94,7 @@ pub enum Value {
 impl Value {
     pub fn get_str(&self) -> String {
         match self {
-            Value::Ref(v) => v.as_ref().borrow().get_str(),
+            Value::Ref(v) => format!("Ref( {} )", v.as_ref().borrow().get_str()),
             Value::Usize(v) => v.to_string(),
             Value::String(v) => v.clone(),
             Value::Float(v) => v.to_string(),
