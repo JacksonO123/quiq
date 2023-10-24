@@ -11,12 +11,13 @@ use crate::{
 pub fn repl() {
     println!("Quiq");
     println!("--------------\n");
-    loop {
-        let mut struct_info = StructInfo::new();
-        let mut vars = Variables::new();
-        let mut functions = vec![];
-        let mut stdout = io::stdout();
+    let mut struct_info = StructInfo::new();
+    let mut vars = Variables::new();
+    let mut functions = vec![];
+    let mut stdout = io::stdout();
 
+    init_builtins(&mut functions);
+    loop {
         print!("> ");
         stdout.flush().unwrap();
         let mut buf = String::new();
@@ -27,7 +28,6 @@ pub fn repl() {
 
         let mut tokens = tokenize(buf, &mut struct_info);
         let tree = generate_tree(&mut struct_info, &mut tokens);
-        init_builtins(&mut functions);
         eval(
             &mut vars,
             &mut functions,
