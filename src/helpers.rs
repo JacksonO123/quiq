@@ -37,7 +37,9 @@ pub fn make_var<'a>(
         let val = match tok {
             EvalValue::Token(t) => {
                 if let Token::Identifier(name) = t {
-                    let var = vars.get(&name, scope, true);
+                    vars.allow_frame_leak();
+                    let var = vars.get(&name, scope);
+                    vars.disable_frame_leak();
                     if let Some(var) = var {
                         let var_ref = &*var.borrow();
                         let value = &var_ref.value;
@@ -539,7 +541,7 @@ pub fn set_var_value<'a>(
     value: Value,
     scope: usize,
 ) {
-    let res_option = vars.get(&name, scope, false);
+    let res_option = vars.get(&name, scope);
     if let Some(var_info) = res_option {
         let var_ref = &*var_info.borrow();
         let var_value = &var_ref.value;
@@ -824,6 +826,7 @@ pub fn is_exp(tokens: &mut Vec<Option<Token>>) -> bool {
         }
 
         match tokens[i].as_ref().unwrap() {
+            Token::Keyword(_) => return false,
             Token::LParen => open_paren += 1,
             Token::RParen => open_paren -= 1,
             Token::LBrace => open_paren += 1,

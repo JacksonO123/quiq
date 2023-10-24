@@ -16,12 +16,14 @@ impl VarFrame {
 
 pub struct Variables {
     frames: Vec<VarFrame>,
+    frame_leak: usize,
 }
 
 impl Variables {
     pub fn new() -> Self {
         Self {
             frames: vec![VarFrame::new()],
+            frame_leak: 0,
         }
     }
     pub fn create_frame(&mut self) {
@@ -41,16 +43,17 @@ impl Variables {
             var_frame.vars.insert(name, vec![value]);
         }
     }
-    pub fn get(
-        &self,
-        name: &String,
-        scope: usize,
-        from_prev: bool,
-    ) -> Option<Rc<RefCell<VarValue>>> {
+    pub fn allow_frame_leak(&mut self) {
+        self.frame_leak += 1;
+    }
+    pub fn disable_frame_leak(&mut self) {
+        self.frame_leak -= 1;
+    }
+    pub fn get(&self, name: &String, scope: usize) -> Option<Rc<RefCell<VarValue>>> {
         let var_frame = self.frames.last().unwrap();
         let var_arr = var_frame.vars.get(name);
         let res = self.find_var_in_arr(var_arr, scope);
-        if res.is_none() && from_prev {
+        if res.is_none() && self.frame_leak > 0 {
             let var_frame = self.frames.get(self.frames.len() - 2).unwrap();
             let var_arr = var_frame.vars.get(name);
             self.find_var_in_arr(var_arr, scope)
