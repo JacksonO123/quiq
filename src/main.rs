@@ -2,6 +2,7 @@ mod ast;
 mod builtins;
 mod helpers;
 mod interpreter;
+mod repl;
 mod tokenizer;
 mod variables;
 
@@ -11,6 +12,7 @@ use std::time::Instant;
 
 use helpers::get_file;
 use interpreter::StructInfo;
+use repl::repl;
 use variables::Variables;
 
 use crate::ast::generate_tree;
@@ -22,12 +24,11 @@ fn main() {
     let start = Instant::now();
 
     let args: Vec<String> = args().collect();
-    let filename = if args.len() == 1 {
-        // repl here
-        panic!("Repl not implemented yet");
-    } else {
-        args[1].as_str()
-    };
+    if args.len() == 1 {
+        repl();
+    }
+
+    let filename = args[1].as_str();
 
     let file_start = Instant::now();
     let file = get_file(format!("src/input/{}", filename).as_str());

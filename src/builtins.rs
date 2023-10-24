@@ -1,6 +1,8 @@
 use std::{
     cell::RefCell,
     io::{Stdout, Write},
+    ops::RangeInclusive,
+    process::exit,
     rc::Rc,
 };
 
@@ -17,6 +19,18 @@ fn expect_params(name: &str, expected: usize, found: usize) {
         panic!(
             "Expected {} params in function `{}`, found {}",
             expected, name, found
+        );
+    }
+}
+
+fn expect_params_range(name: &str, expected: RangeInclusive<usize>, found: usize) {
+    if !expected.contains(&found) {
+        panic!(
+            "Expected {} to {} params in function `{}`, found {}",
+            expected.start(),
+            expected.end(),
+            name,
+            found
         );
     }
 }
@@ -281,4 +295,21 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
             Some(Value::String(res.to_string()))
         },
     )));
+
+    functions.push(Func::Builtin(BuiltinFunc::new(
+        "exit",
+        |vars, mut params, scope, _| {
+            expect_params_range("exit", 0..=1, params.len());
+
+            let val = if params.len() > 0 {
+                let val = params[0].take().unwrap();
+                let val = get_eval_value(vars, val, scope, false);
+                get_value_variant!(val, Int, "exit").clone()
+            } else {
+                0
+            };
+
+            exit(val);
+        },
+    )))
 }

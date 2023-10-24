@@ -2089,7 +2089,10 @@ pub fn get_ref_value(val: &Rc<RefCell<Value>>) -> Rc<RefCell<Value>> {
 }
 
 pub fn input(prompt: &str) -> String {
-    println!("{}", prompt);
+    if prompt.len() > 0 {
+        println!("{}", prompt);
+    }
+
     let mut buf = String::new();
     io::stdin()
         .read_line(&mut buf)
