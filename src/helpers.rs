@@ -392,7 +392,12 @@ fn create_struct_shape<'a>(
     generics: &Vec<String>,
 ) -> StructShape {
     let mut struct_shape = StructShape::new_with_generics(generics.clone());
-    let mut offset = 1;
+    let mut offset = 0;
+
+    while let Token::NewLine = shape[offset].as_ref().unwrap() {
+        offset += 1;
+    }
+
     while offset < shape.len() {
         let mut prop = tokens_to_delimiter(shape, offset, ";");
 

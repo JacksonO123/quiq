@@ -1141,9 +1141,15 @@ pub fn eval_node<'a>(
         }
         AstNode::StatementSeq(seq) => {
             for node in seq.iter() {
-                let (_, quit) = eval_node(vars, functions, structs, scope, &node.borrow(), stdout);
+                let (val, quit) =
+                    eval_node(vars, functions, structs, scope, &node.borrow(), stdout);
+
                 if quit.is_some() {
                     return (None, quit);
+                }
+
+                if seq.len() == 1 {
+                    return (val, None);
                 }
             }
             (None, None)
@@ -1274,7 +1280,8 @@ pub fn eval<'a>(
     structs: &mut StructInfo,
     tree: Ast,
     stdout: &mut Stdout,
-) {
+) -> Option<EvalValue> {
     let root_node = tree.node.borrow();
-    eval_node(vars, functions, structs, 0, &root_node.to_owned(), stdout);
+    let (res, _) = eval_node(vars, functions, structs, 0, &root_node.to_owned(), stdout);
+    res
 }

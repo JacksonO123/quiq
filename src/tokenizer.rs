@@ -162,10 +162,11 @@ fn get_full_token<'a>(chars: &Vec<char>, start: usize) -> String {
     let mut dot_found = false;
     let is_number = chars[start].is_numeric() || chars[start] == '-';
     let mut i = start;
-    while (chars[i].is_alphabetic() && !is_number)
-        || (i == start && chars[i] == '-')
-        || chars[i].is_numeric()
-        || (chars[i] == '.' && !dot_found)
+    while i < chars.len()
+        && ((chars[i].is_alphabetic() && !is_number)
+            || (i == start && chars[i] == '-')
+            || chars[i].is_numeric()
+            || (chars[i] == '.' && !dot_found))
     {
         if chars[i] == '.' {
             if !is_number {

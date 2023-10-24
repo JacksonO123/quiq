@@ -1,8 +1,9 @@
 use std::{io, io::Write};
 
 use crate::{
-    ast::generate_tree,
+    ast::{generate_tree, Value},
     builtins::init_builtins,
+    helpers::get_eval_value,
     interpreter::{eval, StructInfo},
     tokenizer::tokenize,
     variables::Variables,
@@ -28,12 +29,21 @@ pub fn repl() {
 
         let mut tokens = tokenize(buf, &mut struct_info);
         let tree = generate_tree(&mut struct_info, &mut tokens);
-        eval(
+        let res = eval(
             &mut vars,
             &mut functions,
             &mut struct_info,
             tree,
             &mut stdout,
         );
+
+        if let Some(val) = res {
+            let val = get_eval_value(&mut vars, val, 0, false);
+            if let Value::String(s) = val {
+                println!("{:?}", s);
+            } else {
+                println!("{}", val.get_str());
+            }
+        }
     }
 }
