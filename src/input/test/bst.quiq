@@ -3,10 +3,15 @@ struct BstNodeAddParams<T> {
   val: int;
 }
 
+struct BstNodePrintParams<T> {
+  self: ref<BstNode<T>>;
+}
+
 struct BstNode<T> {
   left: union<ref<BstNode<T>>, null>;
   right: union<ref<BstNode<T>>, null>;
   add: fn<BstNodeAddParams, void>;
+  print: fn<BstNodePrintParams<T>, void>;
   value: T;
 }
 
@@ -15,9 +20,14 @@ struct BstAddParams<T> {
   val: int;
 }
 
+struct BstPrintParams<T> {
+  self: ref<Bst<T>>;
+}
+
 struct Bst<T> {
   root: union<BstNode<T>, null>;
   add: fn<BstAddParams<T>, void>;
+  print: fn<BstPrintParams<T>, void>;
 }
 
 func createBstNode(int val) BstNode<int> {
@@ -39,6 +49,21 @@ func createBstNode(int val) BstNode<int> {
           self.right.add(val);
         }
       }
+    },
+    print: func (ref<BstNode<int>> self) void {
+      println("val:", clone(self.value));
+      println(">");
+      println("left:");
+
+      if (self.left != null) {
+        self.left.print();
+      }
+
+      if (self.right != null) {
+        self.right.print();
+      }
+
+      println("<");
     }
   }
 }
@@ -51,6 +76,13 @@ func createBst() Bst<int> {
         self.root = createBstNode(val);
       } else {
         self.root.add(val);
+      }
+    },
+    print: func(ref<Bst<int>> self) void {
+      if (self.root == null) {
+        println("empty tree");
+      } else {
+        self.root.print();
       }
     }
   }
@@ -67,5 +99,5 @@ for (i; 0; 10) {
 // a.add(3);
 // a.add(5);
 
-println(a);
+a.print();
 free(a);
