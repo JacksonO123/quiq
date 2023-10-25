@@ -1642,6 +1642,7 @@ pub fn create_comp_node<'a>(
                 Token::RParen => open_parens -= 1,
                 Token::LBracket => open_parens += 1,
                 Token::RBracket => open_parens -= 1,
+                Token::Keyword(_) => return None,
                 Token::LBrace => return None,
                 Token::RBrace => return None,
                 Token::LAngle => {
@@ -1795,7 +1796,10 @@ macro_rules! comp_match {
     ($structs:expr, $tok:ident, $left:expr, $right:expr) => {
         match $tok {
             Token::EqCompare => comp_bind!($structs, $left, $right, ==),
-            Token::EqNCompare => comp_bind!($structs, $left, $right, !=),
+            Token::EqNCompare => match comp_bind!($structs, $left, $right, ==) {
+                Ok(v) => Ok(!v),
+                Err(e) => Err(e)
+            },
             Token::LAngle => comp_bind!($structs, $left, $right, <),
             Token::RAngle => comp_bind!($structs, $left, $right, >),
             Token::LAngleEq => comp_bind!($structs, $left, $right, <=),
@@ -2028,6 +2032,7 @@ pub fn create_struct_node<'a>(
         let mut property = tokens_to_delimiter(tokens, start, ",");
 
         if let Token::RBrace = property[property.len() - 1].as_ref().unwrap() {
+            start += 1;
             property.remove(property.len() - 1);
         }
 

@@ -166,7 +166,8 @@ fn get_full_token<'a>(chars: &Vec<char>, start: usize) -> String {
         && ((chars[i].is_alphabetic() && !is_number)
             || (i == start && chars[i] == '-')
             || chars[i].is_numeric()
-            || (chars[i] == '.' && !dot_found))
+            || (chars[i] == '.' && !dot_found)
+            || (chars[i] == '_'))
     {
         if chars[i] == '.' {
             if !is_number {

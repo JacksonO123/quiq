@@ -1,18 +1,22 @@
-struct Params<T> {
-  self: ref<Test<T>>;
-  p: int;
+struct OptionIsNoneSomeParams<T> {
+  self: ref<Option<T>>
 }
 
-struct Test<T> {
-  f: fn<Params<T>, T>;
+struct Option<T> {
+  data: union<T, null>;
+  is_some: fn<OptionIsNoneSomeParams<T>, bool>;
+  is_none: fn<OptionIsNoneSomeParams<T>, bool>;
 }
 
-Test<int> t = <Test<int>>{
-  f: func (ref<Test<int>> self, int p) int {
-    println(p);
+Option<int> o = <Option<int>>{
+  data: null,
+  is_some: func (ref<Option<int>> self) bool {
+    return self.data != null;
+  },
+  is_none: func (ref<Option<int>> self) bool {
+    return self.data == null;
   }
 };
 
-t.f(2);
-
-println(t);
+bool temp = o.is_some();
+println(temp);
