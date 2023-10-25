@@ -1,1 +1,18 @@
-struct Test { val: int; }
+struct Params<T> {
+  self: ref<Test<T>>;
+  p: int;
+}
+
+struct Test<T> {
+  f: fn<Params<T>, T>;
+}
+
+Test<int> t = <Test<int>>{
+  f: func (ref<Test<int>> self, int p) int {
+    println(p);
+  }
+};
+
+t.f(2);
+
+println(t);

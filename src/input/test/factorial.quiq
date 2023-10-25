@@ -1,9 +1,9 @@
-func factorial(int num) int {
-  if (num == 0) {
-    return 1;
+func factorial(long num) long {
+  if (num == long(0)) {
+    return long(1);
   } else {
-    return num * factorial(num - 1);
+    return num * factorial(num - long(1));
   }
 }
 
-println(factorial(10));
+println(factorial(long(20)));

@@ -1,7 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, io::Stdout, rc::Rc};
 
 use crate::{
-    ast::{Ast, AstNode, FuncParam, StructShape, Value},
+    ast::{Ast, AstNode, FuncParam, Generics, StructShape, Value},
     helpers::{
         cast, compare, compare_types, flatten_exp, get_eval_value, get_prop_ptr, get_ref_value,
         index_arr_var_value, make_var, push_to_array, set_index_arr, set_var_value,
@@ -213,6 +213,38 @@ impl VarType {
             VarType::Union(_) => "union",
             VarType::StructShape(_) => "struct shape",
             VarType::Generic(g) => g.as_str(),
+        }
+    }
+    pub fn replace_generics_clone(&self, generics: &Generics) -> Self {
+        match self {
+            VarType::Ref(ref_type) => {
+                VarType::Ref(Box::new(ref_type.replace_generics_clone(generics)))
+            }
+            VarType::Array(arr_type) => {
+                VarType::Array(Box::new(arr_type.replace_generics_clone(generics)))
+            }
+            VarType::Fn(param_types, return_type) => VarType::Fn(
+                Box::new(param_types.replace_generics_clone(generics)),
+                Box::new(return_type.replace_generics_clone(generics)),
+            ),
+            VarType::Union(types) => VarType::Union(
+                types
+                    .iter()
+                    .map(|s| s.replace_generics_clone(generics))
+                    .collect(),
+            ),
+            VarType::StructShape(shape) => {
+                let mut temp_shape = shape.clone();
+                for (_, prop_type) in temp_shape.props.iter_mut() {
+                    *prop_type = prop_type.replace_generics_clone(generics);
+                }
+                VarType::StructShape(temp_shape)
+            }
+            VarType::Generic(gen) => generics
+                .get(gen)
+                .expect(&format!("Expected type for generic {}", gen))
+                .clone(),
+            _ => self.clone(),
         }
     }
 }
@@ -606,13 +638,9 @@ pub fn eval_node<'a>(
                     let val_type_option = shape_borrow.props.get(prop_name);
                     if let Some(val_type) = val_type_option {
                         let value_type = type_from_value(&value);
-                        let val_type = if let VarType::Generic(g) = val_type {
-                            shape_borrow.generics.get(g).unwrap()
-                        } else {
-                            val_type
-                        };
+                        let val_type = val_type.replace_generics_clone(&shape_borrow.generics);
 
-                        if !compare_types(structs, val_type, &value_type) {
+                        if !compare_types(structs, &val_type, &value_type) {
                             panic!(
                                 "Type mismatch in struct creation. Expected {:?} found {:?}",
                                 val_type, value

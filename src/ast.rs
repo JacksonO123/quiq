@@ -11,11 +11,13 @@ use crate::{
     tokenizer::{BoolComp, Keyword, Token},
 };
 
+pub type Generics = HashMap<String, VarType>;
+
 #[derive(Debug, Clone)]
 pub struct StructShape {
     pub props: HashMap<String, VarType>,
     pub generic_template: Vec<String>,
-    pub generics: HashMap<String, VarType>,
+    pub generics: Generics,
 }
 
 impl StructShape {
