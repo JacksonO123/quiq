@@ -8,7 +8,7 @@ use std::{
 };
 
 use crate::{
-    ast::{get_ast_node, get_value_arr_str, AstNode, FuncParam, StructShape, Value},
+    ast::{get_ast_node, get_value_arr_str, AstNode, FuncParam, Generics, StructShape, Value},
     interpreter::{
         eval_node, get_var_ptr, value_from_token, CustomFunc, EvalValue, Func, StructInfo,
         StructProp, VarType, VarValue,
@@ -60,7 +60,7 @@ pub fn make_var<'a>(
                 Value::Null => v,
                 _ => {
                     let var_type = type_from_value(&v);
-                    if compare_types(structs, &var_type, &var_type) {
+                    if compare_types(structs, &var_type, &var_type, None) {
                         v
                     } else {
                         panic!(
@@ -549,7 +549,7 @@ pub fn set_var_value<'a>(
         match &var_ref.var_type {
             VarType::Ref(inner_type) => {
                 if let VarType::Ref(value_inner_type) = &new_value_type {
-                    if compare_types(structs, inner_type.as_ref(), &value_inner_type) {
+                    if compare_types(structs, inner_type.as_ref(), &value_inner_type, None) {
                         *var_value.borrow_mut() = value;
                     } else {
                         panic!(
@@ -559,7 +559,7 @@ pub fn set_var_value<'a>(
                         );
                     }
                 } else {
-                    if compare_types(structs, inner_type.as_ref(), &new_value_type) {
+                    if compare_types(structs, inner_type.as_ref(), &new_value_type, None) {
                         if let Value::Ref(ref mut inner_val) = &mut *var_value.borrow_mut() {
                             *inner_val.borrow_mut() = value;
                         }
@@ -573,7 +573,7 @@ pub fn set_var_value<'a>(
                 }
             }
             _ => {
-                if compare_types(structs, &var_ref.var_type, &new_value_type) {
+                if compare_types(structs, &var_ref.var_type, &new_value_type, None) {
                     *var_value.borrow_mut() = value;
                 } else {
                     panic!(
@@ -1006,7 +1006,29 @@ pub fn create_arr<'a>(
     AstNode::Array(node_arr, arr_type)
 }
 
-pub fn compare_types(structs: &mut StructInfo, type1: &VarType, type2: &VarType) -> bool {
+macro_rules! type_from_generic {
+    ($t:ident, $generics:ident) => {
+        $t = if let VarType::Generic(name) = $t {
+            if let Some(g) = $generics {
+                g.get(name).unwrap()
+            } else {
+                $t
+            }
+        } else {
+            $t
+        };
+    };
+}
+
+pub fn compare_types<'a>(
+    structs: &mut StructInfo,
+    mut type1: &'a VarType,
+    mut type2: &'a VarType,
+    generics: Option<&'a Generics>,
+) -> bool {
+    type_from_generic!(type1, generics);
+    type_from_generic!(type2, generics);
+
     match type1 {
         VarType::Int => match type2 {
             VarType::Int => true,
@@ -1045,7 +1067,7 @@ pub fn compare_types(structs: &mut StructInfo, type1: &VarType, type2: &VarType)
             _ => false,
         },
         VarType::Ref(r1) => match type2 {
-            VarType::Ref(r2) => compare_types(structs, r1.as_ref(), r2.as_ref()),
+            VarType::Ref(r2) => compare_types(structs, r1.as_ref(), r2.as_ref(), generics),
             _ => false,
         },
         VarType::Struct(name1, _) => match type2 {
@@ -1064,17 +1086,17 @@ pub fn compare_types(structs: &mut StructInfo, type1: &VarType, type2: &VarType)
             _ => false,
         },
         VarType::Array(a1) => match type2 {
-            VarType::Array(a2) => compare_types(structs, a1.as_ref(), a2.as_ref()),
+            VarType::Array(a2) => compare_types(structs, a1.as_ref(), a2.as_ref(), generics),
             _ => false,
         },
         VarType::Fn(params1, return1) => match type2 {
             VarType::Fn(params2, return2) => {
-                compare_types(structs, params1.as_ref(), params2.as_ref())
-                    && compare_types(structs, return1, return2)
+                compare_types(structs, params1.as_ref(), params2.as_ref(), generics)
+                    && compare_types(structs, return1, return2, generics)
             }
             _ => false,
         },
-        VarType::Union(types) => in_union(structs, types, type2),
+        VarType::Union(types) => in_union(structs, types, type2, generics),
         VarType::Generic(_) => panic!("Cannot compare generic types"),
     }
 }
@@ -1088,7 +1110,7 @@ fn compare_struct_shapes(
         let mut found = false;
         for (name2, type2) in shape2.props.iter() {
             if name1 == name2 {
-                if compare_types(structs, type1, type2) {
+                if compare_types(structs, type1, type2, None) {
                     found = true;
                     break;
                 }
@@ -1101,11 +1123,16 @@ fn compare_struct_shapes(
     true
 }
 
-fn in_union(structs: &mut StructInfo, union: &Vec<VarType>, t: &VarType) -> bool {
+fn in_union(
+    structs: &mut StructInfo,
+    union: &Vec<VarType>,
+    t: &VarType,
+    generics: Option<&Generics>,
+) -> bool {
     if let VarType::Union(types) = t {
         'outer: for union_item1 in union.iter() {
             for union_item2 in types.iter() {
-                if compare_types(structs, union_item1, union_item2) {
+                if compare_types(structs, union_item1, union_item2, generics) {
                     break 'outer;
                 }
             }
@@ -1117,7 +1144,7 @@ fn in_union(structs: &mut StructInfo, union: &Vec<VarType>, t: &VarType) -> bool
     }
 
     for union_item in union.iter() {
-        if compare_types(structs, union_item, t) {
+        if compare_types(structs, union_item, t, generics) {
             return true;
         }
     }
@@ -1193,7 +1220,7 @@ pub fn push_to_array<'a>(
         if let (Some(arg_res), _) = arg_res_option {
             let val = get_eval_value(vars, arg_res, scope, false);
             let val_type = type_from_value(&val);
-            if !compare_types(structs, &arr_type, &val_type) {
+            if !compare_types(structs, &arr_type, &val_type, None) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
                     arr_type,
@@ -1221,7 +1248,7 @@ pub fn unshift_array<'a>(
         if let (Some(arg_res), _) = arg_res_option {
             let val = get_eval_value(vars, arg_res, scope, false);
             let val_type = type_from_value(&val);
-            if !compare_types(structs, &arr_type, &val_type) {
+            if !compare_types(structs, &arr_type, &val_type, None) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
                     arr_type,
@@ -1793,7 +1820,7 @@ fn compare_array(
     left_type: &VarType,
     right_type: &VarType,
 ) -> bool {
-    if !compare_types(structs, left_type, right_type) {
+    if !compare_types(structs, left_type, right_type, None) {
         if left.len() != right.len() {
             return false;
         }
