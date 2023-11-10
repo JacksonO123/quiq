@@ -1062,7 +1062,7 @@ pub fn eval_node<'a>(
                 );
                 if let Some(res_val) = res {
                     return (Some(EvalValue::Value(res_val)), None);
-                }
+                };
             }
 
             res
@@ -1070,7 +1070,7 @@ pub fn eval_node<'a>(
         AstNode::Array(arr_nodes, arr_type) => {
             let mut res_arr: Vec<Value> = Vec::new();
 
-            for node in arr_nodes.iter() {
+            for node in arr_nodes.into_iter() {
                 let res_option = eval_node(vars, functions, structs, scope, node, stdout);
 
                 if let (Some(res), _) = res_option {

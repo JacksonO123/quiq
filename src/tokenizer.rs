@@ -151,7 +151,7 @@ impl Token {
             Token::Bool(_) => "Bool",
             Token::Keyword(_) => "Keyword",
             Token::Identifier(_) => "Identifier",
-            _ => unreachable!(),
+            _ => panic!("Its time"),
         }
     }
 }
@@ -183,7 +183,7 @@ fn get_full_token<'a>(chars: &Vec<char>, start: usize) -> String {
     res
 }
 
-fn get_string_token<'a>(chars: &Vec<char>, start: usize) -> String {
+fn get_string_token<'a>(chars: &[char], start: usize) -> String {
     let mut res = String::new();
     let mut i = start + 1;
     while i < chars.len() {

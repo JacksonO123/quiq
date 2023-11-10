@@ -1,5 +1,6 @@
 use std::{
     cell::RefCell,
+    collections::HashMap,
     fs::{self, File},
     io::{self, Stdout, Write},
     path::Path,
@@ -1077,12 +1078,14 @@ pub fn compare_types<'a>(
                 let shape2 = shape2.clone();
                 let shape2 = &*shape2.borrow();
 
-                compare_struct_shapes(structs, shape1, shape2)
+                compare_struct_shapes(structs, shape1, shape2, generics)
             }
             _ => false,
         },
         VarType::StructShape(shape1) => match type2 {
-            VarType::StructShape(shape2) => compare_struct_shapes(structs, shape1, shape2),
+            VarType::StructShape(shape2) => {
+                compare_struct_shapes(structs, shape1, shape2, generics)
+            }
             _ => false,
         },
         VarType::Array(a1) => match type2 {
@@ -1091,8 +1094,9 @@ pub fn compare_types<'a>(
         },
         VarType::Fn(params1, return1) => match type2 {
             VarType::Fn(params2, return2) => {
-                compare_types(structs, params1.as_ref(), params2.as_ref(), generics)
-                    && compare_types(structs, return1, return2, generics)
+                let params = compare_types(structs, params1.as_ref(), params2.as_ref(), generics);
+                let returns = compare_types(structs, return1, return2, generics);
+                params && returns
             }
             _ => false,
         },
@@ -1105,12 +1109,13 @@ fn compare_struct_shapes(
     structs: &mut StructInfo,
     shape1: &StructShape,
     shape2: &StructShape,
+    generics: Option<&HashMap<String, VarType>>,
 ) -> bool {
     for (name1, type1) in shape1.props.iter() {
         let mut found = false;
         for (name2, type2) in shape2.props.iter() {
             if name1 == name2 {
-                if compare_types(structs, type1, type2, None) {
+                if compare_types(structs, type1, type2, generics) {
                     found = true;
                     break;
                 }
@@ -1552,7 +1557,7 @@ pub fn get_struct_access_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<
                 }
                 Token::Identifier(_) => false,
                 Token::LParen => false,
-                Token::EqSet => false,
+                Token::EqSet => true,
                 _ => true,
             }
         {
@@ -1564,12 +1569,12 @@ pub fn get_struct_access_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<
                     _ => false,
                 }
             {
-                res[index].push(Some(tokens[i + 1].take().unwrap()));
+                res[index].push(tokens[i + 1].take());
                 break;
             }
         } else {
             let index = res.len() - 1;
-            res[index].push(Some(tokens[i].take().unwrap()));
+            res[index].push(tokens[i].take());
         }
 
         i += 1;
@@ -1877,7 +1882,7 @@ fn compare_struct_values(
     true
 }
 
-pub fn compare<'a>(
+pub fn compare(
     vars: &mut Variables,
     structs: &mut StructInfo,
     left: EvalValue,

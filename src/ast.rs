@@ -341,6 +341,7 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
 
                     let mut access_token_nodes: Vec<AstNode> = Vec::new();
                     let mut tokens_clone = get_struct_access_tokens(tokens);
+
                     for token_clone in tokens_clone.iter_mut() {
                         let res = get_ast_node(structs, token_clone).unwrap();
                         access_token_nodes.push(res);
@@ -396,6 +397,7 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
                         )
                     }
                 }
+                Token::Semicolon => Some(AstNode::Token(tokens[0].take().unwrap())),
                 _ => {
                     let includes_struct = structs.available_structs.contains_key(ident);
                     if includes_struct {
@@ -481,6 +483,7 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
                 Token::Keyword(Keyword::If) => true,
                 Token::Keyword(Keyword::Else) => true,
                 Token::Keyword(Keyword::Return) => true,
+                Token::Keyword(Keyword::While) => true,
                 Token::Identifier(_) => true,
                 _ => false,
             } {

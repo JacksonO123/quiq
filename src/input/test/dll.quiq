@@ -1,0 +1,82 @@
+struct AddProps<T> {
+  self: ref<DllNode<T>>;
+  val: ref<DllNode<T>>;
+}
+
+struct DllNodeSelf<T> {
+  self: ref<DllNode<T>>;
+}
+
+struct DllNode<T> {
+  value: T;
+  next: union<ref<DllNode<T>>, null>;
+  prev: union<ref<DllNode<T>>, null>;
+  add: fn<AddProps<T>, void>;
+  print: fn<DllNodeSelf<T>, void>;
+}
+
+struct DllAddProps<T> {
+  self: ref<Dll<T>>;
+  val: T;
+}
+
+struct DllSelf<T> {
+  self: ref<Dll<T>>;
+}
+
+struct Dll<T> {
+  root: union<DllNode<T>, null>;
+  add: fn<DllAddProps<T>, void>;
+  print: fn<DllSelf<T>, void>;
+}
+
+func createDllNode(int val) DllNode<int> {
+  return <DllNode<int>>{
+    value: val,
+    next: null,
+    prev: null,
+    add: func (ref<DllNode<int>> self, ref<DllNode<int>> val) void {
+      if (self.next != null) {
+        self.next.prev = val;
+        val.next = self.next;
+      }
+
+      self.next = val;
+      val.prev = self;
+    },
+    print: func (ref<DllNode<int>> self) void {
+      println(clone(self.value));
+      if (self.next != null) {
+        self.next.print();
+      }
+    }
+  };
+}
+
+func createDll() Dll<int> {
+  return <Dll<int>>{
+    root: null,
+    add: func (ref<Dll<int>> self, int val) void {
+      DllNode<int> newNode = createDllNode(val);
+      if (self.root == null) {
+        self.root = clone(newNode);
+      } else {
+        self.root.add(ref(newNode));
+      }
+      free(newNode);
+    },
+    print: func (ref<Dll<int>> self) void {
+      if (self.root == null) {
+        println("[ empty ]");
+      } else {
+        self.root.print();
+      }
+    }
+  };
+}
+
+Dll<int> d = createDll();
+
+d.add(2);
+d.add(4);
+d.print();
