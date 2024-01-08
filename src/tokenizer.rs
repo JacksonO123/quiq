@@ -1,9 +1,6 @@
 use std::{cell::RefCell, rc::Rc};
 
-use crate::{
-    ast::StructShape,
-    interpreter::{StructInfo, VarType},
-};
+use crate::{ast::StructShape, data::Data, interpreter::VarType};
 
 #[derive(Clone, Copy, Debug)]
 pub enum OperatorType {
@@ -105,7 +102,7 @@ pub enum Token {
 impl Token {
     pub fn get_str(&self) -> &str {
         match self {
-            Token::Type(var_type) => &var_type.get_str(),
+            Token::Type(var_type) => var_type.get_str(),
             Token::Number(n) => n,
             Token::String(s) => s,
             Token::Bool(b) => {
@@ -156,7 +153,7 @@ impl Token {
     }
 }
 
-fn get_full_token<'a>(chars: &Vec<char>, start: usize) -> String {
+fn get_full_token(chars: &Vec<char>, start: usize) -> String {
     let mut res = String::new();
 
     let mut dot_found = false;
@@ -183,7 +180,7 @@ fn get_full_token<'a>(chars: &Vec<char>, start: usize) -> String {
     res
 }
 
-fn get_string_token<'a>(chars: &[char], start: usize) -> String {
+fn get_string_token(chars: &[char], start: usize) -> String {
     let mut res = String::new();
     let mut i = start + 1;
     while i < chars.len() {
@@ -199,7 +196,7 @@ fn get_string_token<'a>(chars: &[char], start: usize) -> String {
     res
 }
 
-fn get_full_line<'a>(chars: &Vec<char>, start: usize) -> String {
+fn get_full_line(chars: &Vec<char>, start: usize) -> String {
     let mut res = String::new();
     let mut i = start;
     while i < chars.len() {
@@ -215,9 +212,8 @@ fn get_full_line<'a>(chars: &Vec<char>, start: usize) -> String {
     res
 }
 
-pub fn tokenize(code: &str, structs: &mut StructInfo) -> Vec<Option<Token>> {
+pub fn tokenize(code: &str, data: &mut Data) -> Vec<Option<Token>> {
     let mut tokens = Vec::new();
-
     let mut found_struct = false;
 
     let mut i = 0;
@@ -268,7 +264,7 @@ pub fn tokenize(code: &str, structs: &mut StructInfo) -> Vec<Option<Token>> {
                     } else if chars[0].is_alphabetic() {
                         if found_struct {
                             found_struct = false;
-                            structs.add_available_struct(
+                            data.structs().add_available_struct(
                                 value.clone(),
                                 Rc::new(RefCell::new(StructShape::new())),
                             );
@@ -389,7 +385,7 @@ pub fn tokenize(code: &str, structs: &mut StructInfo) -> Vec<Option<Token>> {
     tokens
 }
 
-fn is_number(string: &String) -> bool {
+fn is_number(string: &str) -> bool {
     let mut found_decimal = false;
     let mut first = true;
     string.chars().all(|c| {
@@ -404,7 +400,7 @@ fn is_number(string: &String) -> bool {
             found_decimal = true;
             true
         } else {
-            c.is_digit(10)
+            c.is_ascii_digit()
         }
     })
 }

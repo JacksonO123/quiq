@@ -8,10 +8,10 @@ use std::{
 
 use crate::{
     ast::Value,
+    data::Data,
     helpers::{get_eval_value, get_file, get_ref_value, input, write_file},
     interpreter::{get_var_ptr, value_from_token, BuiltinFunc, EvalValue, Func, VarType},
     tokenizer::Token,
-    variables::Variables,
 };
 
 fn expect_params(name: &str, expected: usize, found: usize) {
@@ -46,7 +46,7 @@ macro_rules! get_value_variant {
 }
 
 fn print_abstracted(
-    vars: &mut Variables,
+    data: &mut Data,
     mut params: Vec<Option<EvalValue>>,
     scope: usize,
     stdout: &mut Stdout,
@@ -57,7 +57,7 @@ fn print_abstracted(
             EvalValue::Value(val) => val.get_str(),
             EvalValue::Token(tok) => match tok {
                 Token::Identifier(ident) => {
-                    let var_ptr = get_var_ptr(vars, &ident, scope);
+                    let var_ptr = get_var_ptr(data, &ident, scope);
                     let var_borrow = var_ptr.borrow();
                     let var_value = &*var_borrow.value.borrow();
                     var_value.get_str()
@@ -76,11 +76,13 @@ fn print_abstracted(
     }
 }
 
-pub fn init_builtins(functions: &mut Vec<Func>) {
+pub fn init_builtins(data: &mut Data) {
+    let functions = data.functions();
+
     functions.push(Func::Builtin(BuiltinFunc::new(
         "print",
-        |vars, params, scope, stdout| {
-            print_abstracted(vars, params, scope, stdout);
+        |data, params, scope, stdout| {
+            print_abstracted(data, params, scope, stdout);
 
             None
         },
@@ -88,8 +90,8 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "println",
-        |vars, params, scope, stdout| {
-            print_abstracted(vars, params, scope, stdout);
+        |data, params, scope, stdout| {
+            print_abstracted(data, params, scope, stdout);
 
             stdout.write_all(b"\n").unwrap();
             None
@@ -98,13 +100,13 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "type",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params("type", 1, params.len());
 
             let res = match params[0].take().unwrap() {
                 EvalValue::Token(t) => match t {
                     Token::Identifier(ident) => {
-                        let ptr = get_var_ptr(vars, &ident, scope);
+                        let ptr = get_var_ptr(data, &ident, scope);
                         let ptr_borrow = ptr.borrow();
                         let ptr_value = ptr_borrow.value.borrow();
                         ptr_value.get_enum_str().clone()
@@ -120,7 +122,7 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "ref",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params("ref", 1, params.len());
 
             match &params[0].take().unwrap() {
@@ -130,7 +132,7 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
                 EvalValue::Value(val) => Some(Value::Ref(Rc::new(RefCell::new(val.clone())))),
                 EvalValue::Token(t) => match t {
                     Token::Identifier(ident) => {
-                        let val = get_var_ptr(vars, &ident, scope);
+                        let val = get_var_ptr(data, ident, scope);
                         let val_ref = val.borrow_mut();
                         Some(Value::Ref(Rc::clone(&val_ref.value)))
                     }
@@ -142,9 +144,9 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "clone",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             let eval_value = params[0].take().unwrap();
-            let to_clone = get_eval_value(vars, eval_value, scope, true);
+            let to_clone = get_eval_value(data, eval_value, scope, true);
             Some(match to_clone {
                 Value::Ref(r) => get_ref_value(&r).borrow().clone(),
                 _ => to_clone,
@@ -154,14 +156,14 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "free",
-        |vars, mut params, scope, _| {
-            for i in 0..params.len() {
-                let param = params[i].take().unwrap();
+        |data, mut params, scope, _| {
+            for item in &mut params {
+                let param = item.take().unwrap();
                 match param {
                     EvalValue::Value(_) => panic!("Expected variable identifier to free"),
                     EvalValue::Token(t) => {
                         if let Token::Identifier(ident) = t {
-                            vars.free(&ident, scope);
+                            data.vars().free(&ident, scope);
                         } else {
                             panic!("Expected variable identifier to free");
                         }
@@ -184,19 +186,19 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
     // debug
     functions.push(Func::Builtin(BuiltinFunc::new(
         "showVars",
-        |vars, _, _, _| {
-            vars.print();
+        |data, _, _, _| {
+            data.vars().print();
             None
         },
     )));
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "input",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params("input", 1, params.len());
 
             let param = params[0].take().unwrap();
-            let val = get_eval_value(vars, param, scope, false);
+            let val = get_eval_value(data, param, scope, false);
 
             let s = val.get_str();
             Some(Value::String(input(&s)))
@@ -205,11 +207,11 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "readFile",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params("readFile", 1, params.len());
 
             let param = params[0].take().unwrap();
-            let val = get_eval_value(vars, param, scope, false);
+            let val = get_eval_value(data, param, scope, false);
 
             let s = get_value_variant!(val, String, "readFile");
             let file = get_file(s);
@@ -219,18 +221,18 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "writeFile",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params("writeFile", 2, params.len());
 
             let destination = params[0].take().unwrap();
             let info = params[1].take().unwrap();
 
-            let dest = get_eval_value(vars, destination, scope, false);
-            let info = get_eval_value(vars, info, scope, false);
+            let dest = get_eval_value(data, destination, scope, false);
+            let info = get_eval_value(data, info, scope, false);
 
             let dest = get_value_variant!(dest, String, "writeFile");
             let info = get_value_variant!(info, String, "writeFile");
-            write_file(&dest, &info).expect("Error writing file");
+            write_file(dest, info).expect("Error writing file");
 
             None
         },
@@ -238,11 +240,11 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "parse",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params("parse", 1, params.len());
 
             let param = params[0].take().unwrap();
-            let val = get_eval_value(vars, param, scope, false);
+            let val = get_eval_value(data, param, scope, false);
 
             let s = get_value_variant!(val, String, "parse");
             let token = Token::Number(s.clone());
@@ -252,14 +254,14 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "split",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params("split", 2, params.len());
 
             let string = params[0].take().unwrap();
             let delimiter = params[1].take().unwrap();
 
-            let val = get_eval_value(vars, string, scope, false);
-            let delimiter_val = get_eval_value(vars, delimiter, scope, false);
+            let val = get_eval_value(data, string, scope, false);
+            let delimiter_val = get_eval_value(data, delimiter, scope, false);
 
             let string = get_value_variant!(val, String, "split");
             let delimiter = get_value_variant!(delimiter_val, String, "split");
@@ -275,20 +277,20 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "substr",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params("substr", 3, params.len());
 
             let str = params[0].take().unwrap();
-            let str_val = get_eval_value(vars, str, scope, false);
+            let str_val = get_eval_value(data, str, scope, false);
             let str = get_value_variant!(str_val, String, "substr");
 
             let from = params[1].take().unwrap();
-            let from_val = get_eval_value(vars, from, scope, false);
-            let from = get_value_variant!(from_val, Usize, "substr").clone();
+            let from_val = get_eval_value(data, from, scope, false);
+            let from = *get_value_variant!(from_val, Usize, "substr");
 
             let to = params[2].take().unwrap();
-            let to_val = get_eval_value(vars, to, scope, false);
-            let to = get_value_variant!(to_val, Usize, "substr").clone();
+            let to_val = get_eval_value(data, to, scope, false);
+            let to = *get_value_variant!(to_val, Usize, "substr");
 
             let res = &str[from..to];
 
@@ -298,13 +300,13 @@ pub fn init_builtins(functions: &mut Vec<Func>) {
 
     functions.push(Func::Builtin(BuiltinFunc::new(
         "exit",
-        |vars, mut params, scope, _| {
+        |data, mut params, scope, _| {
             expect_params_range("exit", 0..=1, params.len());
 
-            let val = if params.len() > 0 {
+            let val = if !params.is_empty() {
                 let val = params[0].take().unwrap();
-                let val = get_eval_value(vars, val, scope, false);
-                get_value_variant!(val, Int, "exit").clone()
+                let val = get_eval_value(data, val, scope, false);
+                *get_value_variant!(val, Int, "exit")
             } else {
                 0
             };

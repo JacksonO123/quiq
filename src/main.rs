@@ -1,19 +1,18 @@
 mod ast;
 mod builtins;
+mod data;
 mod helpers;
 mod interpreter;
 mod repl;
 mod tokenizer;
-mod variables;
 
 use std::env::args;
 use std::io;
 use std::time::Instant;
 
+use data::Data;
 use helpers::get_file;
-use interpreter::StructInfo;
 use repl::repl;
-use variables::Variables;
 
 use crate::ast::generate_tree;
 use crate::builtins::init_builtins;
@@ -34,36 +33,27 @@ fn main() {
     let file = get_file(format!("src/input/{}", filename).as_str());
     let file_end = file_start.elapsed();
 
-    let mut struct_info = StructInfo::new();
+    let mut data = Data::new();
 
     let tokens_start = Instant::now();
-    let mut tokens = tokenize(file.as_str(), &mut struct_info);
+    let mut tokens = tokenize(file.as_str(), &mut data);
     let tokens_end = tokens_start.elapsed();
 
     let tree_start = Instant::now();
-    let tree = generate_tree(&mut struct_info, &mut tokens);
+    let tree = generate_tree(&mut data, &mut tokens);
     let tree_end = tree_start.elapsed();
 
-    let mut vars = Variables::new();
-    let mut functions = vec![];
-
-    init_builtins(&mut functions);
+    init_builtins(&mut data);
 
     let mut stdout = io::stdout();
 
     let eval_start = Instant::now();
-    eval(
-        &mut vars,
-        &mut functions,
-        &mut struct_info,
-        tree,
-        &mut stdout,
-    );
+    eval(&mut data, tree, &mut stdout);
     let eval_end = eval_start.elapsed();
 
     let end = start.elapsed();
 
-    if args.iter().position(|a| a == "-b").is_some() {
+    if args.iter().any(|a| a == "-b") {
         println!();
         println!(
             "[{}] read in {}s | {}ms | {}µs | {}ns",

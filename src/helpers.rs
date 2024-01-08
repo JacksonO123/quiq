@@ -10,18 +10,16 @@ use std::{
 
 use crate::{
     ast::{get_ast_node, get_value_arr_str, AstNode, FuncParam, Generics, StructShape, Value},
+    data::Data,
     interpreter::{
-        eval_node, get_var_ptr, value_from_token, CustomFunc, EvalValue, Func, StructInfo,
-        StructProp, VarType, VarValue,
+        eval_node, get_var_ptr, value_from_token, CustomFunc, EvalValue, StructInfo, StructProp,
+        VarType, VarValue,
     },
     tokenizer::{Keyword, Token},
-    variables::Variables,
 };
 
-pub fn make_var<'a>(
-    vars: &mut Variables,
-    functions: &mut Vec<Func<'a>>,
-    structs: &mut StructInfo,
+pub fn make_var(
+    data: &mut Data,
     scope: usize,
     var_type: &VarType,
     name: &Token,
@@ -29,7 +27,7 @@ pub fn make_var<'a>(
     stdout: &mut Stdout,
 ) {
     let value = if let Some(val) = value {
-        eval_node(vars, functions, structs, scope, val.as_ref(), stdout)
+        eval_node(data, scope, val.as_ref(), stdout)
     } else {
         (Some(EvalValue::Value(Value::Null)), None)
     };
@@ -38,6 +36,7 @@ pub fn make_var<'a>(
         let val = match tok {
             EvalValue::Token(t) => {
                 if let Token::Identifier(name) = t {
+                    let vars = data.vars();
                     vars.allow_frame_leak();
                     let var = vars.get(&name, scope);
                     vars.disable_frame_leak();
@@ -46,7 +45,7 @@ pub fn make_var<'a>(
                         let value = &var_ref.value;
                         let val_ref = &*value.borrow();
                         if let Value::Ref(r) = val_ref {
-                            Value::Ref(Rc::clone(&r))
+                            Value::Ref(Rc::clone(r))
                         } else {
                             val_ref.clone()
                         }
@@ -61,7 +60,7 @@ pub fn make_var<'a>(
                 Value::Null => v,
                 _ => {
                     let var_type = type_from_value(&v);
-                    if compare_types(structs, &var_type, &var_type, None) {
+                    if compare_types(data, &var_type, &var_type, None) {
                         v
                     } else {
                         panic!(
@@ -85,13 +84,14 @@ pub fn make_var<'a>(
         };
 
         let var = VarValue::new(var_name.clone(), val, var_type.clone(), scope);
+        let vars = data.vars();
         vars.insert(var_name.clone(), var);
     } else {
         panic!("Expected {} found void", var_type.get_str());
     }
 }
 
-pub fn create_make_var_node<'a>(
+pub fn create_make_var_node(
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
     is_struct: bool,
@@ -99,27 +99,25 @@ pub fn create_make_var_node<'a>(
     let first_token = tokens[0].take().unwrap();
     let mut var_type = if let Token::Type(t) = first_token {
         t
+    } else if is_struct {
+        if let Token::Identifier(ident) = first_token {
+            VarType::Struct(ident.clone(), vec![])
+        } else {
+            panic!("Expected identifier for variable name");
+        }
     } else {
-        if is_struct {
-            if let Token::Identifier(ident) = first_token {
-                VarType::Struct(ident.clone(), vec![])
+        let name = match first_token {
+            Token::Identifier(ident) => Some(ident),
+            _ => None,
+        };
+        if let Some(n) = name {
+            if let Some(t) = get_builtin_generic(&n, structs, tokens, &vec![]) {
+                t
             } else {
-                panic!("Expected identifier for variable name");
+                panic!("Type {} is not generic", n);
             }
         } else {
-            let name = match first_token {
-                Token::Identifier(ident) => Some(ident),
-                _ => None,
-            };
-            if let Some(n) = name {
-                if let Some(t) = get_builtin_generic(&n, structs, tokens, &vec![]) {
-                    t
-                } else {
-                    panic!("Type {} is not generic", n);
-                }
-            } else {
-                panic!("Expected identifier for variable name");
-            }
+            panic!("Expected identifier for variable name");
         }
     };
 
@@ -140,10 +138,7 @@ pub fn create_make_var_node<'a>(
     }
 
     let mut i = generic_tokens.len() + 3;
-    while match tokens[i + 1].as_ref() {
-        Some(Token::LBracket) => true,
-        _ => false,
-    } {
+    while matches!(tokens[i + 1].as_ref(), Some(Token::LBracket)) {
         var_type = VarType::Array(Box::new(var_type));
 
         i += 2;
@@ -151,10 +146,7 @@ pub fn create_make_var_node<'a>(
 
     let eq_pos = tokens.iter().position(|t| {
         if t.is_some() {
-            match t.as_ref().unwrap() {
-                Token::EqSet => true,
-                _ => false,
-            }
+            matches!(t.as_ref().unwrap(), Token::EqSet)
         } else {
             false
         }
@@ -176,7 +168,7 @@ pub fn create_make_var_node<'a>(
     }
 
     let len = tokens.len();
-    return AstNode::MakeVar(var_type, tokens[len - 2].take().unwrap(), None);
+    AstNode::MakeVar(var_type, tokens[len - 2].take().unwrap(), None)
 }
 
 pub fn generic_types_from_tokens(
@@ -187,7 +179,7 @@ pub fn generic_types_from_tokens(
     let mut generic_types = vec![];
     let mut type_offset = 0;
     let mut temp_tokens = tokens_to_delimiter(tokens, type_offset, ",");
-    while temp_tokens.len() > 0 {
+    while !temp_tokens.is_empty() {
         let generic_type = get_type_expression(&mut temp_tokens, structs, allowed_generics);
         generic_types.push(generic_type);
         type_offset += temp_tokens.len() + 1;
@@ -196,22 +188,10 @@ pub fn generic_types_from_tokens(
     generic_types
 }
 
-pub fn create_set_var_node<'a>(
-    structs: &mut StructInfo,
-    tokens: &mut Vec<Option<Token>>,
-) -> AstNode {
+pub fn create_set_var_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> AstNode {
     let eq_pos = tokens
         .iter()
-        .position(|s| {
-            if let Some(tok) = s {
-                match tok {
-                    Token::EqSet => true,
-                    _ => false,
-                }
-            } else {
-                false
-            }
-        })
+        .position(|s| matches!(s, Some(Token::EqSet)))
         .unwrap();
 
     let mut value_to_set = tokens_to_delimiter(tokens, eq_pos + 1, ";");
@@ -222,7 +202,7 @@ pub fn create_set_var_node<'a>(
     AstNode::SetVar(tokens[0].take().unwrap(), Box::new(node.unwrap()))
 }
 
-pub fn create_keyword_node<'a>(
+pub fn create_keyword_node(
     tokens: &mut Vec<Option<Token>>,
     structs: &mut StructInfo,
     keyword: Keyword,
@@ -279,7 +259,7 @@ pub fn create_keyword_node<'a>(
                 Some(v) => v,
                 None => panic!("Expected end value in for loop"),
             };
-            let inc_node = if inc_tokens.len() > 0 {
+            let inc_node = if !inc_tokens.is_empty() {
                 Some(Box::new(
                     get_ast_node(structs, &mut inc_tokens).expect("Expected inc value in for loop"),
                 ))
@@ -338,7 +318,7 @@ pub fn create_keyword_node<'a>(
             let mut return_type_tokens =
                 tokens_to_delimiter(tokens, 4 - offset + param_tokens.len(), "{");
 
-            if return_type_tokens.len() == 0 {
+            if return_type_tokens.is_empty() {
                 panic!("Expected return type for function");
             }
 
@@ -372,7 +352,7 @@ fn get_generics(tokens: &mut Vec<Option<Token>>) -> Vec<String> {
     let mut generic_tokens = tokens_to_delimiter(tokens, offset, ",");
     let mut res = vec![];
 
-    while generic_tokens.len() > 0 {
+    while !generic_tokens.is_empty() {
         let temp = generic_tokens.last().unwrap();
         if let Some(Token::RAngle) = &temp {
             generic_tokens.pop();
@@ -389,7 +369,7 @@ fn get_generics(tokens: &mut Vec<Option<Token>>) -> Vec<String> {
     res
 }
 
-fn create_struct_shape<'a>(
+fn create_struct_shape(
     shape: &mut Vec<Option<Token>>,
     structs: &mut StructInfo,
     generics: &Vec<String>,
@@ -404,14 +384,11 @@ fn create_struct_shape<'a>(
     while offset < shape.len() {
         let mut prop = tokens_to_delimiter(shape, offset, ";");
 
-        if prop.len() == 0 {
+        if prop.is_empty() {
             break;
         }
 
-        while match prop[0].as_ref().unwrap() {
-            Token::NewLine => true,
-            _ => false,
-        } {
+        while matches!(prop[0].as_ref().unwrap(), Token::NewLine) {
             prop.remove(0).unwrap();
         }
 
@@ -458,7 +435,7 @@ pub fn get_param_definitions(
     res
 }
 
-fn get_params<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Vec<AstNode> {
+fn get_params(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Vec<AstNode> {
     let mut arg_nodes: Vec<AstNode> = Vec::new();
     let mut temp_tokens: Vec<Option<Token>> = Vec::new();
     let mut i = 2;
@@ -508,7 +485,7 @@ fn get_params<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> 
         panic!("Expected token: )");
     }
 
-    if temp_tokens.len() > 0 {
+    if !temp_tokens.is_empty() {
         let arg_node_option = get_ast_node(structs, &mut temp_tokens);
         if let Some(arg_node) = arg_node_option {
             arg_nodes.push(arg_node);
@@ -520,10 +497,7 @@ fn get_params<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> 
     arg_nodes
 }
 
-pub fn create_func_call_node<'a>(
-    structs: &mut StructInfo,
-    tokens: &mut Vec<Option<Token>>,
-) -> AstNode {
+pub fn create_func_call_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> AstNode {
     let params = get_params(structs, tokens);
 
     let func_name = if let Token::Identifier(ident) = tokens[0].take().unwrap() {
@@ -535,14 +509,8 @@ pub fn create_func_call_node<'a>(
     AstNode::CallFunc(func_name, params)
 }
 
-pub fn set_var_value<'a>(
-    vars: &mut Variables,
-    structs: &mut StructInfo,
-    name: String,
-    value: Value,
-    scope: usize,
-) {
-    let res_option = vars.get(&name, scope);
+pub fn set_var_value(data: &mut Data, name: String, value: Value, scope: usize) {
+    let res_option = data.vars().get(&name, scope);
     if let Some(var_info) = res_option {
         let var_ref = &*var_info.borrow();
         let var_value = &var_ref.value;
@@ -550,7 +518,7 @@ pub fn set_var_value<'a>(
         match &var_ref.var_type {
             VarType::Ref(inner_type) => {
                 if let VarType::Ref(value_inner_type) = &new_value_type {
-                    if compare_types(structs, inner_type.as_ref(), &value_inner_type, None) {
+                    if compare_types(data, inner_type.as_ref(), value_inner_type, None) {
                         *var_value.borrow_mut() = value;
                     } else {
                         panic!(
@@ -559,22 +527,20 @@ pub fn set_var_value<'a>(
                             type_from_value(&value)
                         );
                     }
-                } else {
-                    if compare_types(structs, inner_type.as_ref(), &new_value_type, None) {
-                        if let Value::Ref(ref mut inner_val) = &mut *var_value.borrow_mut() {
-                            *inner_val.borrow_mut() = value;
-                        }
-                    } else {
-                        panic!(
-                            "expected type: {:?} found {:?}",
-                            new_value_type,
-                            type_from_value(&value)
-                        );
+                } else if compare_types(data, inner_type.as_ref(), &new_value_type, None) {
+                    if let Value::Ref(ref mut inner_val) = &mut *var_value.borrow_mut() {
+                        *inner_val.borrow_mut() = value;
                     }
+                } else {
+                    panic!(
+                        "expected type: {:?} found {:?}",
+                        new_value_type,
+                        type_from_value(&value)
+                    );
                 }
             }
             _ => {
-                if compare_types(structs, &var_ref.var_type, &new_value_type, None) {
+                if compare_types(data, &var_ref.var_type, &new_value_type, None) {
                     *var_value.borrow_mut() = value;
                 } else {
                     panic!(
@@ -590,10 +556,10 @@ pub fn set_var_value<'a>(
     }
 }
 
-pub fn tokens_to_delimiter<'a>(
+pub fn tokens_to_delimiter(
     tokens: &mut Vec<Option<Token>>,
     start: usize,
-    delimiter: &'a str,
+    delimiter: &str,
 ) -> Vec<Option<Token>> {
     let mut res = vec![];
     let mut has_unclosed_left_angle = false;
@@ -643,32 +609,24 @@ pub fn tokens_to_delimiter<'a>(
     res
 }
 
-pub fn tokens_to_operator<'a>(tokens: &mut Vec<Option<Token>>, start: usize) -> Vec<Option<Token>> {
+pub fn tokens_to_operator(tokens: &mut [Option<Token>], start: usize) -> Vec<Option<Token>> {
     let mut res = vec![];
 
     let mut open_brackets = 0;
-    for i in start..tokens.len() {
-        if match tokens[i].as_ref().unwrap() {
-            Token::LParen => true,
-            Token::LBrace => true,
-            Token::LBracket => true,
-            _ => false,
-        } {
+    for item in tokens.iter_mut().skip(start) {
+        if matches!(
+            item.as_ref().unwrap(),
+            Token::LParen | Token::LBrace | Token::LBracket
+        ) {
             open_brackets += 1;
-        } else if match tokens[i].as_ref().unwrap() {
-            Token::RParen => true,
-            Token::RBrace => true,
-            Token::RBracket => true,
-            _ => false,
-        } {
+        } else if matches!(
+            item.as_ref().unwrap(),
+            Token::RParen | Token::RBrace | Token::RBracket
+        ) {
             open_brackets -= 1;
         }
-        if match tokens[i].as_ref().unwrap() {
-            Token::Operator(_) => false,
-            _ => true,
-        } || open_brackets > 0
-        {
-            res.push(Some(tokens[i].take().unwrap()));
+        if !matches!(item.as_ref().unwrap(), Token::Operator(_)) || open_brackets > 0 {
+            res.push(Some(item.take().unwrap()));
         } else {
             return res;
         }
@@ -677,7 +635,7 @@ pub fn tokens_to_operator<'a>(tokens: &mut Vec<Option<Token>>, start: usize) -> 
     res
 }
 
-pub fn get_bool_exp_node<'a>(
+pub fn get_bool_exp_node(
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
 ) -> Option<AstNode> {
@@ -709,14 +667,11 @@ pub fn get_bool_exp_node<'a>(
         }
 
         if open_brackets == 0 {
-            if match tokens[i].as_ref().unwrap() {
-                Token::BoolComp(_) => true,
-                _ => false,
-            } {
+            if matches!(tokens[i].as_ref().unwrap(), Token::BoolComp(_)) {
                 let mut right_tokens = vec![];
 
-                for j in i + 1..tokens.len() {
-                    right_tokens.push(tokens[j].take());
+                for item in tokens.iter_mut().skip(i + 1) {
+                    right_tokens.push(item.take());
                 }
 
                 let left = get_ast_node(structs, &mut left_tokens).unwrap();
@@ -766,11 +721,8 @@ pub fn is_bool_exp(tokens: &mut Vec<Option<Token>>) -> bool {
     false
 }
 
-pub fn get_exp_node<'a>(
-    structs: &mut StructInfo,
-    tokens: &mut Vec<Option<Token>>,
-) -> Vec<Box<AstNode>> {
-    let mut res: Vec<Box<AstNode>> = Vec::new();
+pub fn get_exp_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Vec<AstNode> {
+    let mut res: Vec<AstNode> = Vec::new();
 
     let mut i = 0;
     while i < tokens.len() {
@@ -779,32 +731,26 @@ pub fn get_exp_node<'a>(
             continue;
         }
 
-        match tokens[i].as_ref().unwrap() {
-            Token::Operator(_) => {
-                let node = AstNode::Token(tokens[i].take().unwrap());
-                res.push(Box::new(node));
-                i += 1;
-                continue;
-            }
-            _ => {}
+        if let Token::Operator(_) = tokens[i].as_ref().unwrap() {
+            let node = AstNode::Token(tokens[i].take().unwrap());
+            res.push(node);
+            i += 1;
+            continue;
         }
 
         let mut to_op = tokens_to_operator(tokens, i);
 
-        if to_op.len() > 0 {
-            if match to_op[0].as_ref().unwrap() {
-                Token::LParen => true,
-                _ => false,
-            } {
+        if !to_op.is_empty() {
+            if matches!(to_op[0].as_ref().unwrap(), Token::LParen) {
                 let slice = &to_op[1..to_op.len() - 1];
                 let mut slice: Vec<Option<Token>> = slice.iter().map(|t| t.to_owned()).collect();
                 let exp_nodes = get_exp_node(structs, &mut slice);
                 let node = AstNode::Exp(exp_nodes);
-                res.push(Box::new(node));
+                res.push(node);
             } else {
                 let node_option = get_ast_node(structs, &mut to_op);
                 if let Some(node) = node_option {
-                    res.push(Box::new(node));
+                    res.push(node);
                 }
             }
         }
@@ -859,24 +805,22 @@ pub enum ExpValue {
     Operator(Token),
 }
 
-pub fn flatten_exp<'a>(
-    vars: &mut Variables,
-    functions: &mut Vec<Func<'a>>,
-    structs: &mut StructInfo,
+pub fn flatten_exp(
+    data: &mut Data,
     scope: usize,
-    exp: &Vec<Box<AstNode>>,
+    exp: &[AstNode],
     stdout: &mut Stdout,
 ) -> Vec<Option<ExpValue>> {
     let mut res = vec![];
 
     for exp_node in exp.iter() {
-        let tok_option = eval_node(vars, functions, structs, scope, exp_node.as_ref(), stdout);
+        let tok_option = eval_node(data, scope, exp_node, stdout);
         if let (Some(tok), _) = tok_option {
             let val = match tok {
                 EvalValue::Token(tok) => match tok {
                     Token::Operator(_) => ExpValue::Operator(tok),
                     Token::Identifier(ident) => {
-                        let var_ptr = get_var_ptr(vars, &ident, scope);
+                        let var_ptr = get_var_ptr(data, &ident, scope);
                         let var_ref = var_ptr.borrow();
                         let var_value_borrow = var_ref.value.borrow();
 
@@ -897,7 +841,7 @@ pub fn flatten_exp<'a>(
     res
 }
 
-pub fn create_bang_bool<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> AstNode {
+pub fn create_bang_bool(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> AstNode {
     tokens.remove(0);
 
     let ast_node = get_ast_node(structs, tokens);
@@ -943,12 +887,10 @@ pub fn get_type_expression(
                         get_builtin_generic(&ident, structs, tokens, allowed_generics);
                     if let Some(t) = generic_type {
                         t
+                    } else if allowed_generics.contains(&ident) {
+                        VarType::Generic(ident)
                     } else {
-                        if allowed_generics.contains(&ident) {
-                            VarType::Generic(ident)
-                        } else {
-                            panic!("Expected type or struct name for type expression")
-                        }
+                        panic!("Expected type or struct name for type expression")
                     }
                 }
             },
@@ -962,12 +904,7 @@ pub fn get_type_expression(
         let mut index = 1;
 
         let mut arr_type = first_type;
-        while index < tokens.len()
-            && match tokens[index].as_ref().unwrap() {
-                Token::LBracket => true,
-                _ => false,
-            }
-        {
+        while index < tokens.len() && matches!(tokens[index].as_ref().unwrap(), Token::LBracket) {
             arr_type = VarType::Array(Box::new(arr_type));
             index += 1;
         }
@@ -976,7 +913,7 @@ pub fn get_type_expression(
     }
 }
 
-pub fn create_arr<'a>(
+pub fn create_arr(
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
     arr_type: VarType,
@@ -1022,7 +959,7 @@ macro_rules! type_from_generic {
 }
 
 pub fn compare_types<'a>(
-    structs: &mut StructInfo,
+    data: &mut Data,
     mut type1: &'a VarType,
     mut type2: &'a VarType,
     generics: Option<&'a Generics>,
@@ -1031,82 +968,53 @@ pub fn compare_types<'a>(
     type_from_generic!(type2, generics);
 
     match type1 {
-        VarType::Int => match type2 {
-            VarType::Int => true,
-            _ => false,
-        },
-        VarType::Long => match type2 {
-            VarType::Long => true,
-            _ => false,
-        },
-        VarType::Double => match type2 {
-            VarType::Double => true,
-            _ => false,
-        },
-        VarType::Float => match type2 {
-            VarType::Float => true,
-            _ => false,
-        },
-        VarType::Bool => match type2 {
-            VarType::Bool => true,
-            _ => false,
-        },
-        VarType::String => match type2 {
-            VarType::String => true,
-            _ => false,
-        },
-        VarType::Null => match type2 {
-            VarType::Null => true,
-            _ => false,
-        },
-        VarType::Void => match type2 {
-            VarType::Void => true,
-            _ => false,
-        },
-        VarType::Usize => match type2 {
-            VarType::Usize => true,
-            _ => false,
-        },
+        VarType::Int => matches!(type2, VarType::Int),
+        VarType::Long => matches!(type2, VarType::Long),
+        VarType::Double => matches!(type2, VarType::Double),
+        VarType::Float => matches!(type2, VarType::Float),
+        VarType::Bool => matches!(type2, VarType::Bool),
+        VarType::String => matches!(type2, VarType::String),
+        VarType::Null => matches!(type2, VarType::Null),
+        VarType::Void => matches!(type2, VarType::Void),
+        VarType::Usize => matches!(type2, VarType::Usize),
         VarType::Ref(r1) => match type2 {
-            VarType::Ref(r2) => compare_types(structs, r1.as_ref(), r2.as_ref(), generics),
+            VarType::Ref(r2) => compare_types(data, r1.as_ref(), r2.as_ref(), generics),
             _ => false,
         },
         VarType::Struct(name1, _) => match type2 {
             VarType::Struct(name2, _) => name1 == name2,
             VarType::StructShape(shape1) => {
-                let shape2 = structs.available_structs.get(name1).unwrap();
+                let shape2 = data.structs().available_structs.get(name1).unwrap();
                 let shape2 = shape2.clone();
                 let shape2 = &*shape2.borrow();
 
-                compare_struct_shapes(structs, shape1, shape2, generics)
+                compare_struct_shapes(data, shape1, shape2, generics)
             }
             _ => false,
         },
         VarType::StructShape(shape1) => match type2 {
-            VarType::StructShape(shape2) => {
-                compare_struct_shapes(structs, shape1, shape2, generics)
-            }
+            VarType::StructShape(shape2) => compare_struct_shapes(data, shape1, shape2, generics),
             _ => false,
         },
         VarType::Array(a1) => match type2 {
-            VarType::Array(a2) => compare_types(structs, a1.as_ref(), a2.as_ref(), generics),
+            VarType::Array(a2) => compare_types(data, a1.as_ref(), a2.as_ref(), generics),
             _ => false,
         },
         VarType::Fn(params1, return1) => match type2 {
             VarType::Fn(params2, return2) => {
-                let params = compare_types(structs, params1.as_ref(), params2.as_ref(), generics);
-                let returns = compare_types(structs, return1, return2, generics);
+                let params = compare_types(data, params1.as_ref(), params2.as_ref(), generics);
+                let returns = compare_types(data, return1, return2, generics);
                 params && returns
             }
             _ => false,
         },
-        VarType::Union(types) => in_union(structs, types, type2, generics),
+        VarType::Union(types) => in_union(data, types, type2, generics),
         VarType::Generic(_) => panic!("Cannot compare generic types"),
     }
 }
 
 fn compare_struct_shapes(
-    structs: &mut StructInfo,
+    data: &mut Data,
     shape1: &StructShape,
     shape2: &StructShape,
     generics: Option<&HashMap<String, VarType>>,
@@ -1114,11 +1022,9 @@ fn compare_struct_shapes(
     for (name1, type1) in shape1.props.iter() {
         let mut found = false;
         for (name2, type2) in shape2.props.iter() {
-            if name1 == name2 {
-                if compare_types(structs, type1, type2, generics) {
-                    found = true;
-                    break;
-                }
+            if name1 == name2 && compare_types(data, type1, type2, generics) {
+                found = true;
+                break;
             }
         }
         if !found {
@@ -1128,28 +1034,27 @@ fn compare_struct_shapes(
     true
 }
 
-fn in_union(
-    structs: &mut StructInfo,
-    union: &Vec<VarType>,
-    t: &VarType,
-    generics: Option<&Generics>,
-) -> bool {
+fn in_union(data: &mut Data, union: &[VarType], t: &VarType, generics: Option<&Generics>) -> bool {
     if let VarType::Union(types) = t {
-        'outer: for union_item1 in union.iter() {
+        if let Some(union_item1) = union.iter().next() {
+            let mut found = false;
             for union_item2 in types.iter() {
-                if compare_types(structs, union_item1, union_item2, generics) {
-                    break 'outer;
+                if compare_types(data, union_item1, union_item2, generics) {
+                    found = true;
+                    break;
                 }
             }
 
-            return false;
+            if !found {
+                return false;
+            }
         }
 
         return true;
     }
 
     for union_item in union.iter() {
-        if compare_types(structs, union_item, t, generics) {
+        if compare_types(data, union_item, t, generics) {
             return true;
         }
     }
@@ -1157,12 +1062,7 @@ fn in_union(
     false
 }
 
-pub fn get_eval_value(
-    vars: &mut Variables,
-    val: EvalValue,
-    scope: usize,
-    return_ptr: bool,
-) -> Value {
+pub fn get_eval_value(data: &mut Data, val: EvalValue, scope: usize, return_ptr: bool) -> Value {
     match val {
         EvalValue::Value(v) => v,
         EvalValue::Token(t) => match t {
@@ -1171,13 +1071,13 @@ pub fn get_eval_value(
             Token::Bool(_) => value_from_token(&t, None),
             Token::Null => value_from_token(&t, None),
             Token::Identifier(ident) => {
-                let var_ptr = get_var_ptr(vars, &ident, scope);
+                let var_ptr = get_var_ptr(data, &ident, scope);
                 let var_ref = var_ptr.borrow();
 
                 if return_ptr {
                     let ref_value = &var_ref.value;
                     if let Value::Ref(r) = &*ref_value.borrow() {
-                        Value::Ref(Rc::clone(&r))
+                        Value::Ref(Rc::clone(r))
                     } else {
                         let val = Rc::clone(ref_value);
                         Value::Ref(val)
@@ -1185,7 +1085,7 @@ pub fn get_eval_value(
                 } else {
                     let ref_value = &var_ref.value;
                     if let Value::Ref(r) = &*ref_value.borrow() {
-                        Value::Ref(Rc::clone(&r))
+                        Value::Ref(Rc::clone(r))
                     } else {
                         var_ref.value.borrow().clone()
                     }
@@ -1196,7 +1096,7 @@ pub fn get_eval_value(
     }
 }
 
-pub fn get_prop_ptr(props: &mut Vec<StructProp>, name: &String) -> Option<Rc<RefCell<Value>>> {
+pub fn get_prop_ptr(props: &mut [StructProp], name: &String) -> Option<Rc<RefCell<Value>>> {
     let mut ptr = None;
 
     for prop in props.iter_mut() {
@@ -1209,23 +1109,21 @@ pub fn get_prop_ptr(props: &mut Vec<StructProp>, name: &String) -> Option<Rc<Ref
     ptr
 }
 
-pub fn push_to_array<'a>(
-    vars: &mut Variables,
-    functions: &mut Vec<Func<'a>>,
-    structs: &mut StructInfo,
+pub fn push_to_array(
+    data: &mut Data,
     scope: usize,
     arr: &mut Vec<Value>,
     arr_type: &VarType,
-    args: &Vec<AstNode>,
+    args: &[AstNode],
     stdout: &mut Stdout,
 ) {
     for arg in args.iter() {
-        let arg_res_option = eval_node(vars, functions, structs, scope, arg, stdout);
+        let arg_res_option = eval_node(data, scope, arg, stdout);
 
         if let (Some(arg_res), _) = arg_res_option {
-            let val = get_eval_value(vars, arg_res, scope, false);
+            let val = get_eval_value(data, arg_res, scope, false);
             let val_type = type_from_value(&val);
-            if !compare_types(structs, &arr_type, &val_type, None) {
+            if !compare_types(data, arr_type, &val_type, None) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
                     arr_type,
@@ -1237,23 +1135,21 @@ pub fn push_to_array<'a>(
     }
 }
 
-pub fn unshift_array<'a>(
-    vars: &mut Variables,
-    functions: &mut Vec<Func<'a>>,
-    structs: &mut StructInfo,
+pub fn unshift_array(
+    data: &mut Data,
     scope: usize,
     arr: &mut Vec<Value>,
     arr_type: &VarType,
-    args: &Vec<AstNode>,
+    args: &[AstNode],
     stdout: &mut Stdout,
 ) {
     for (i, arg) in args.iter().enumerate() {
-        let arg_res_option = eval_node(vars, functions, structs, scope, arg, stdout);
+        let arg_res_option = eval_node(data, scope, arg, stdout);
 
         if let (Some(arg_res), _) = arg_res_option {
-            let val = get_eval_value(vars, arg_res, scope, false);
+            let val = get_eval_value(data, arg_res, scope, false);
             let val_type = type_from_value(&val);
-            if !compare_types(structs, &arr_type, &val_type, None) {
+            if !compare_types(data, arr_type, &val_type, None) {
                 panic!(
                     "Error pushing to array, expected type: {:?} found {:?}",
                     arr_type,
@@ -1302,7 +1198,7 @@ pub fn type_from_value(val: &Value) -> VarType {
     }
 }
 
-pub fn create_cast_node<'a>(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> AstNode {
+pub fn create_cast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> AstNode {
     let mut node_tokens = tokens_to_delimiter(tokens, 2, ")");
     let node_option = get_ast_node(structs, &mut node_tokens);
 
@@ -1526,25 +1422,21 @@ pub fn cast(to_type: &VarType, val: Value) -> Value {
     }
 }
 
-pub fn get_struct_access_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<Option<Token>>> {
+pub fn get_struct_access_tokens(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<Option<Token>>> {
     let mut res = vec![vec![]];
     let mut i = 0;
 
     let mut open_brackets = 0;
     while i < tokens.len() {
-        if match tokens[i].as_ref().unwrap() {
-            Token::LParen => true,
-            Token::LBrace => true,
-            Token::LBracket => true,
-            _ => false,
-        } {
+        if matches!(
+            tokens[i].as_ref().unwrap(),
+            Token::LParen | Token::LBrace | Token::LBracket
+        ) {
             open_brackets += 1;
-        } else if match tokens[i].as_ref().unwrap() {
-            Token::RParen => true,
-            Token::RBrace => true,
-            Token::RBracket => true,
-            _ => false,
-        } {
+        } else if matches!(
+            tokens[i].as_ref().unwrap(),
+            Token::RParen | Token::RBrace | Token::RBracket
+        ) {
             open_brackets -= 1;
         }
 
@@ -1563,12 +1455,7 @@ pub fn get_struct_access_tokens<'a>(tokens: &mut Vec<Option<Token>>) -> Vec<Vec<
         {
             let index = res.len() - 1;
             res[index].push(Some(tokens[i].take().unwrap()));
-            if i + 1 < tokens.len()
-                && match tokens[i + 1].as_ref().unwrap() {
-                    Token::Semicolon => true,
-                    _ => false,
-                }
-            {
+            if i + 1 < tokens.len() && matches!(tokens[i + 1].as_ref().unwrap(), Token::Semicolon) {
                 res[index].push(tokens[i + 1].take());
                 break;
             }
@@ -1625,7 +1512,7 @@ pub fn is_sequence(tokens: &mut Vec<Option<Token>>) -> bool {
     open_brackets == 0 && (semicolons > 0 || closed_blocks > 1)
 }
 
-pub fn create_comp_node<'a>(
+pub fn create_comp_node(
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
 ) -> Option<AstNode> {
@@ -1641,8 +1528,8 @@ pub fn create_comp_node<'a>(
     {
         // check for generics or braces
         let mut has_left_angle = false;
-        for i in 0..tokens.len() {
-            match tokens[i].as_ref().unwrap() {
+        for item in tokens.iter() {
+            match item.as_ref().unwrap() {
                 Token::LParen => open_parens += 1,
                 Token::RParen => open_parens -= 1,
                 Token::LBracket => open_parens += 1,
@@ -1705,15 +1592,15 @@ pub fn create_comp_node<'a>(
             _ => false,
         } && open_parens == 0
         {
-            for j in 0..i {
-                temp_tokens.push(Some(tokens[j].take().unwrap()));
+            for item in tokens.iter_mut().take(i) {
+                temp_tokens.push(Some(item.take().unwrap()));
             }
 
             if let Some(left_node) = get_ast_node(structs, &mut temp_tokens) {
                 temp_tokens.drain(0..temp_tokens.len());
 
-                for j in i + 1..tokens.len() {
-                    temp_tokens.push(Some(tokens[j].take().unwrap()));
+                for item in tokens.iter_mut().skip(i + 1) {
+                    temp_tokens.push(Some(item.take().unwrap()));
                 }
 
                 if let Some(right_node) = get_ast_node(structs, &mut temp_tokens) {
@@ -1735,7 +1622,7 @@ pub fn create_comp_node<'a>(
 }
 
 macro_rules! comp {
-    ($structs:expr, $left:expr, $right:expr, ==, $($variants:ident),*) => {
+    ($data:expr, $left:expr, $right:expr, ==, $($variants:ident),*) => {
         {
             match $left {
                 $(
@@ -1746,7 +1633,7 @@ macro_rules! comp {
                     }
                 )*
                 Value::Array(left_arr, left_type) => match $right {
-                    Value::Array(right_arr, right_type) => Ok(compare_array($structs, left_arr, right_arr, left_type, right_type)),
+                    Value::Array(right_arr, right_type) => Ok(compare_array($data, left_arr, right_arr, left_type, right_type)),
                     _ => Ok(false)
                 }
                 Value::Struct(left_name, _, props_left) => match $right {
@@ -1754,7 +1641,7 @@ macro_rules! comp {
                         Ok(if left_name == right_name {
                             false
                         } else {
-                            compare_struct_values($structs, props_left, props_right)
+                            compare_struct_values($data, props_left, props_right)
                         })
                     },
                     _ => Ok(false)
@@ -1765,7 +1652,7 @@ macro_rules! comp {
                 }
                 Value::Ref(r) => {
                     let new_left = &*r.borrow();
-                    comp_eq_abstraction($structs, new_left, $right)
+                    comp_eq_abstraction($data, new_left, $right)
                 },
                 Value::Fn(_) => Err(String::from("Cannot compare functions"))
             }
@@ -1792,8 +1679,8 @@ macro_rules! comp {
 }
 
 macro_rules! comp_bind {
-    ($structs:expr, $left:expr, $right:expr, $tok:tt) => {
-        comp!($structs, $left, $right, $tok, Usize, String, Int, Float, Double, Long, Bool)
+    ($data:expr, $left:expr, $right:expr, $tok:tt) => {
+        comp!($data, $left, $right, $tok, Usize, String, Int, Float, Double, Long, Bool)
     };
 }
 
@@ -1814,28 +1701,24 @@ macro_rules! comp_match {
     }
 }
 
-fn comp_eq_abstraction(
-    structs: &mut StructInfo,
-    left: &Value,
-    right: &Value,
-) -> Result<bool, String> {
-    comp_bind!(structs, left, right, ==)
+fn comp_eq_abstraction(data: &mut Data, left: &Value, right: &Value) -> Result<bool, String> {
+    comp_bind!(data, left, right, ==)
 }
 
 fn compare_array(
-    structs: &mut StructInfo,
-    left: &Vec<Value>,
-    right: &Vec<Value>,
+    data: &mut Data,
+    left: &[Value],
+    right: &[Value],
     left_type: &VarType,
     right_type: &VarType,
 ) -> bool {
-    if !compare_types(structs, left_type, right_type, None) {
+    if !compare_types(data, left_type, right_type, None) {
         if left.len() != right.len() {
             return false;
         }
 
         for i in 0..left.len() {
-            if match comp!(structs, &left[i], &right[i], ==, Usize, String, Int, Float, Double, Long, Bool)
+            if match comp!(data, &left[i], &right[i], ==, Usize, String, Int, Float, Double, Long, Bool)
             {
                 Ok(val) => !val,
                 Err(msg) => {
@@ -1853,11 +1736,7 @@ fn compare_array(
     }
 }
 
-fn compare_struct_values(
-    structs: &mut StructInfo,
-    left: &Vec<StructProp>,
-    right: &Vec<StructProp>,
-) -> bool {
+fn compare_struct_values(data: &mut Data, left: &[StructProp], right: &[StructProp]) -> bool {
     for left_val in left.iter() {
         let mut found = false;
 
@@ -1865,10 +1744,7 @@ fn compare_struct_values(
             if left_val.name == right_val.name {
                 let left = left_val.value.borrow().clone();
                 let right = left_val.value.borrow().clone();
-                if match comp_bind!(structs, &left, &right, ==) {
-                    Ok(val) => val,
-                    Err(_) => false,
-                } {
+                if comp_bind!(data, &left, &right, ==).unwrap_or(false) {
                     found = true;
                 }
             }
@@ -1883,8 +1759,7 @@ fn compare_struct_values(
 }
 
 pub fn compare(
-    vars: &mut Variables,
-    structs: &mut StructInfo,
+    data: &mut Data,
     left: EvalValue,
     right: EvalValue,
     comp_token: &Token,
@@ -1893,40 +1768,40 @@ pub fn compare(
     let res = match left {
         EvalValue::Value(left_val) => match right {
             EvalValue::Value(right_val) => {
-                comp_match!(structs, comp_token, &left_val, &right_val)
+                comp_match!(data, comp_token, &left_val, &right_val)
             }
             EvalValue::Token(t) => match t {
                 Token::Identifier(ident) => {
-                    let var_ptr = get_var_ptr(vars, &ident, scope);
+                    let var_ptr = get_var_ptr(data, &ident, scope);
                     let var_ref = var_ptr.borrow();
                     let right_val = &*var_ref.value.borrow();
-                    comp_match!(structs, comp_token, &left_val, right_val)
+                    comp_match!(data, comp_token, &left_val, right_val)
                 }
                 _ => {
                     let right_val = value_from_token(&t, None);
-                    comp_match!(structs, comp_token, &left_val, &right_val)
+                    comp_match!(data, comp_token, &left_val, &right_val)
                 }
             },
         },
         EvalValue::Token(t) => match t {
             Token::Identifier(ident) => {
-                let var_ptr = get_var_ptr(vars, &ident, scope);
+                let var_ptr = get_var_ptr(data, &ident, scope);
                 let var_ref = var_ptr.borrow();
                 let left_val = &*var_ref.value.borrow();
                 match right {
                     EvalValue::Value(right_val) => {
-                        comp_match!(structs, comp_token, left_val, &right_val)
+                        comp_match!(data, comp_token, left_val, &right_val)
                     }
                     EvalValue::Token(t) => match t {
                         Token::Identifier(ident) => {
-                            let var_ptr = get_var_ptr(vars, &ident, scope);
+                            let var_ptr = get_var_ptr(data, &ident, scope);
                             let var_ref = var_ptr.borrow();
                             let right_val = &*var_ref.value.borrow();
-                            comp_match!(structs, comp_token, &left_val, right_val)
+                            comp_match!(data, comp_token, left_val, right_val)
                         }
                         _ => {
                             let right_val = value_from_token(&t, None);
-                            comp_match!(structs, comp_token, left_val, &right_val)
+                            comp_match!(data, comp_token, left_val, &right_val)
                         }
                     },
                 }
@@ -1936,18 +1811,18 @@ pub fn compare(
 
                 match right {
                     EvalValue::Value(right_val) => {
-                        comp_match!(structs, comp_token, &left_val, &right_val)
+                        comp_match!(data, comp_token, &left_val, &right_val)
                     }
                     EvalValue::Token(t) => match t {
                         Token::Identifier(ident) => {
-                            let var_ptr = get_var_ptr(vars, &ident, scope);
+                            let var_ptr = get_var_ptr(data, &ident, scope);
                             let var_ref = var_ptr.borrow();
                             let right_val = &*var_ref.value.borrow();
-                            comp_match!(structs, comp_token, &left_val, right_val)
+                            comp_match!(data, comp_token, &left_val, right_val)
                         }
                         _ => {
                             let right_val = value_from_token(&t, None);
-                            comp_match!(structs, comp_token, &left_val, &right_val)
+                            comp_match!(data, comp_token, &left_val, &right_val)
                         }
                     },
                 }
@@ -1965,14 +1840,14 @@ pub fn compare(
 }
 
 pub fn index_arr_var_value(
-    vars: &mut Variables,
+    data: &mut Data,
     arr: Rc<RefCell<VarValue>>,
     index: EvalValue,
     scope: usize,
 ) -> Value {
     match &*arr.borrow().value.borrow() {
         Value::Array(arr, _) => {
-            let index = get_eval_value(vars, index, scope, false);
+            let index = get_eval_value(data, index, scope, false);
 
             if let Value::Usize(val) = index {
                 arr[val].clone()
@@ -1984,22 +1859,20 @@ pub fn index_arr_var_value(
     }
 }
 
-pub fn set_index_arr<'a>(
-    vars: &mut Variables,
-    functions: &mut Vec<Func<'a>>,
-    structs: &mut StructInfo,
+pub fn set_index_arr(
+    data: &mut Data,
     scope: usize,
     stdout: &mut Stdout,
     arr: Rc<RefCell<VarValue>>,
     index: EvalValue,
     value: AstNode,
 ) {
-    if let (Some(value), _) = eval_node(vars, functions, structs, scope, &value, stdout) {
-        let index_val = get_eval_value(vars, index, scope, false);
+    if let (Some(value), _) = eval_node(data, scope, &value, stdout) {
+        let index_val = get_eval_value(data, index, scope, false);
         match index_val {
             Value::Usize(val) => match *arr.borrow_mut().value.borrow_mut() {
                 Value::Array(ref mut arr_val, _) => {
-                    arr_val[val] = get_eval_value(vars, value, scope, false);
+                    arr_val[val] = get_eval_value(data, value, scope, false);
                 }
                 _ => panic!("Only arrays can be indexed"),
             },
@@ -2010,11 +1883,11 @@ pub fn set_index_arr<'a>(
     }
 }
 
-pub fn create_struct_node<'a>(
+pub fn create_struct_node(
     tokens: &mut Vec<Option<Token>>,
     structs: &mut StructInfo,
     shape: Rc<RefCell<StructShape>>,
-    name: &String,
+    name: &str,
 ) -> AstNode {
     let mut start = 1;
     let mut props: Vec<(String, AstNode)> = Vec::new();
@@ -2022,10 +1895,7 @@ pub fn create_struct_node<'a>(
     let mut i = 0;
     while i < tokens.len() {
         if let Some(tok) = tokens[i].as_ref() {
-            if match tok {
-                Token::NewLine => true,
-                _ => false,
-            } {
+            if matches!(tok, Token::NewLine) {
                 tokens.remove(i);
             } else {
                 i += 1;
@@ -2041,7 +1911,7 @@ pub fn create_struct_node<'a>(
             property.remove(property.len() - 1);
         }
 
-        if property.len() == 0 {
+        if property.is_empty() {
             break;
         }
 
@@ -2066,22 +1936,22 @@ pub fn create_struct_node<'a>(
         start += len + 1;
     }
 
-    AstNode::CreateStruct(name.clone(), shape, props)
+    AstNode::CreateStruct(name.to_owned(), shape, props)
 }
 
-const BUILTIN_GENERIC: [&'static str; 3] = ["ref", "fn", "union"];
+const BUILTIN_GENERIC: [&str; 3] = ["ref", "fn", "union"];
 
-fn is_builtin_generic(name: &String) -> bool {
-    BUILTIN_GENERIC.iter().position(|&s| s == name).is_some()
+fn is_builtin_generic(name: &str) -> bool {
+    BUILTIN_GENERIC.iter().any(|&s| s == name)
 }
 
 fn get_builtin_generic(
-    name: &String,
+    name: &str,
     structs: &mut StructInfo,
     tokens: &mut Vec<Option<Token>>,
     allowed_generics: &Vec<String>,
 ) -> Option<VarType> {
-    match name.as_str() {
+    match name {
         "ref" => {
             let mut type_tokens = tokens_to_delimiter(tokens, 2, ">");
             let generic_type = get_type_expression(&mut type_tokens, structs, allowed_generics);
@@ -2111,7 +1981,7 @@ fn get_builtin_generic(
                 let mut other_type = tokens_to_delimiter(&mut type_tokens, offset, ",");
                 offset += other_type.len() + 1;
 
-                if other_type.len() == 0 {
+                if other_type.is_empty() {
                     break;
                 }
 
@@ -2134,7 +2004,7 @@ pub fn get_ref_value(val: &Rc<RefCell<Value>>) -> Rc<RefCell<Value>> {
 }
 
 pub fn input(prompt: &str) -> String {
-    if prompt.len() > 0 {
+    if !prompt.is_empty() {
         println!("{}", prompt);
     }
 

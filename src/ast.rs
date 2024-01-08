@@ -1,6 +1,7 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 use crate::{
+    data::Data,
     helpers::{
         create_arr, create_bang_bool, create_cast_node, create_comp_node, create_func_call_node,
         create_keyword_node, create_make_var_node, create_set_var_node, create_struct_node,
@@ -55,8 +56,8 @@ pub fn get_value_arr_str(values: &Vec<Value>) -> String {
             }
         }
     } else {
-        for i in 0..size_buffer {
-            res.push_str(&values[i].get_str());
+        for (i, val) in values.iter().enumerate().take(size_buffer) {
+            res.push_str(&val.get_str());
             if i < size_buffer - 1 {
                 res.push_str(", ");
             } else {
@@ -115,7 +116,7 @@ impl Value {
                 for (i, prop) in props.iter().enumerate() {
                     let temp_str = prop.name.clone().to_owned() + ": " + prop.get_str().as_str();
                     let new_lines: Vec<String> = temp_str
-                        .split("\n")
+                        .split('\n')
                         .map(|line| "\t".to_owned() + line)
                         .collect();
                     let mut new_str = new_lines.join("\n");
@@ -181,7 +182,7 @@ pub enum AstNode {
     Token(Token),
     CallFunc(String, Vec<AstNode>),
     Bang(Box<AstNode>),
-    Exp(Vec<Box<AstNode>>),
+    Exp(Vec<AstNode>),
     If(Box<AstNode>, Box<AstNode>, Option<Box<AstNode>>),
     Else(Box<AstNode>),
     Array(Vec<AstNode>, VarType),
@@ -199,7 +200,7 @@ pub enum AstNode {
         Box<AstNode>,
     ),
     /// exp node
-    While(Vec<Box<AstNode>>, Box<AstNode>),
+    While(Vec<AstNode>, Box<AstNode>),
     IndexArr(Token, Box<AstNode>),
     /// arr ident, index, value
     SetArrIndex(Token, Box<AstNode>, Box<AstNode>),
@@ -230,7 +231,7 @@ impl Ast {
 }
 
 pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Option<AstNode> {
-    if tokens.len() == 0 {
+    if tokens.is_empty() {
         None
     } else if tokens.len() == 1 {
         Some(AstNode::Token(tokens[0].take().unwrap()))
@@ -240,24 +241,13 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
             return Some(sequence_node);
         }
 
-        while tokens.len() > 0
-            && match tokens[0].as_ref().unwrap() {
-                Token::NewLine => true,
-                _ => false,
-            }
-        {
+        while !tokens.is_empty() && matches!(tokens[0].as_ref().unwrap(), Token::NewLine) {
             tokens.remove(0);
         }
 
         while tokens.len() > 1
-            && match tokens[0].as_ref().unwrap() {
-                Token::LParen => true,
-                _ => false,
-            }
-            && match tokens.last().unwrap().as_ref().unwrap() {
-                Token::RParen => true,
-                _ => false,
-            }
+            && matches!(tokens[0].as_ref().unwrap(), Token::LParen)
+            && matches!(tokens.last().unwrap().as_ref().unwrap(), Token::RParen)
         {
             tokens.remove(tokens.len() - 1);
             tokens.remove(0);
@@ -416,20 +406,16 @@ pub fn get_ast_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -
             }
         };
 
-        if let Some(nt) = node_type {
-            Some(nt)
-        } else {
-            None
-        }
+        node_type
     }
 }
 
-fn get_sequence_slice<'a>(tokens: &mut Vec<Option<Token>>, start: usize) -> Vec<Option<Token>> {
+fn get_sequence_slice(tokens: &mut [Option<Token>], start: usize) -> Vec<Option<Token>> {
     let mut slice = Vec::new();
     let mut open_parens = 0;
 
-    for i in start..tokens.len() {
-        slice.push(Some(tokens[i].take().unwrap()));
+    for item in tokens.iter_mut().skip(start) {
+        slice.push(Some(item.take().unwrap()));
         match slice[slice.len() - 1].as_ref().unwrap() {
             Token::Semicolon => {
                 if open_parens == 0 {
@@ -478,17 +464,17 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
             continue;
         }
 
-        if i > 0 {
-            if match tokens[i - 1].as_ref().unwrap() {
-                Token::Keyword(Keyword::If) => true,
-                Token::Keyword(Keyword::Else) => true,
-                Token::Keyword(Keyword::Return) => true,
-                Token::Keyword(Keyword::While) => true,
-                Token::Identifier(_) => true,
-                _ => false,
-            } {
-                i -= 1;
-            }
+        if i > 0
+            && matches!(
+                tokens[i - 1].as_ref().unwrap(),
+                Token::Keyword(Keyword::If)
+                    | Token::Keyword(Keyword::Else)
+                    | Token::Keyword(Keyword::Return)
+                    | Token::Keyword(Keyword::While)
+                    | Token::Identifier(_)
+            )
+        {
+            i -= 1;
         }
         let mut token_slice = get_sequence_slice(tokens, i);
         let token_num = token_slice.len();
@@ -496,7 +482,7 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
         let node_option = get_ast_node(structs, &mut token_slice);
         if let Some(node) = node_option {
             if let AstNode::Else(block) = node {
-                if seq.len() > 0 {
+                if !seq.is_empty() {
                     if let AstNode::If(_, _, ref mut else_block) =
                         &mut *seq[seq.len() - 1].borrow_mut()
                     {
@@ -514,10 +500,10 @@ fn generate_sequence_node(structs: &mut StructInfo, tokens: &mut Vec<Option<Toke
     AstNode::StatementSeq(seq)
 }
 
-pub fn generate_tree(structs: &mut StructInfo, tokens: &mut Vec<Option<Token>>) -> Ast {
+pub fn generate_tree(data: &mut Data, tokens: &mut Vec<Option<Token>>) -> Ast {
     let mut tree = Ast::new();
 
-    let node_option = get_ast_node(structs, tokens);
+    let node_option = get_ast_node(data.structs(), tokens);
     if let Some(node) = node_option {
         tree.node = Rc::new(RefCell::new(node));
     }

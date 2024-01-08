@@ -1,22 +1,7 @@
-struct OptionIsNoneSomeParams<T> {
-  self: ref<Option<T>>
+int[] h = <int>[];
+
+for (i; 0; 1000000) {
+  h.push(i);
 }
 
-struct Option<T> {
-  data: union<T, null>;
-  is_some: fn<OptionIsNoneSomeParams<T>, bool>;
-  is_none: fn<OptionIsNoneSomeParams<T>, bool>;
-}
-
-Option<int> o = <Option<int>>{
-  data: null,
-  is_some: func (ref<Option<int>> self) bool {
-    return self.data != null;
-  },
-  is_none: func (ref<Option<int>> self) bool {
-    return self.data == null;
-  }
-};
-
-bool temp = o.is_some();
-println(temp);
+println(h);

@@ -1,6 +1,36 @@
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
-use crate::interpreter::VarValue;
+use crate::interpreter::{Func, StructInfo, VarValue};
+
+type FunctionsType<'a> = Vec<Func<'a>>;
+
+pub struct Data<'a> {
+    vars: Variables,
+    functions: FunctionsType<'a>,
+    structs: StructInfo,
+}
+
+impl<'a> Data<'a> {
+    pub fn new() -> Self {
+        Self {
+            vars: Variables::new(),
+            functions: vec![],
+            structs: StructInfo::new(),
+        }
+    }
+
+    pub fn functions(&mut self) -> &mut FunctionsType<'a> {
+        &mut self.functions
+    }
+
+    pub fn vars(&mut self) -> &mut Variables {
+        &mut self.vars
+    }
+
+    pub fn structs(&mut self) -> &mut StructInfo {
+        &mut self.structs
+    }
+}
 
 #[derive(Debug)]
 struct VarFrame {
@@ -72,7 +102,7 @@ impl Variables {
             for (i, var) in var_arr.iter().enumerate() {
                 let var_ref = &*var.borrow();
                 if var_ref.scope == scope {
-                    return Some(Rc::clone(&var));
+                    return Some(Rc::clone(var));
                 } else if var_ref.scope < scope && var_ref.scope > max_scope {
                     max_scope = var_ref.scope;
                     max_scope_index = i;
@@ -102,9 +132,7 @@ impl Variables {
             while i < var_arr.len() {
                 if var_arr[i].borrow().scope == scope {
                     var_arr.remove(i);
-                    if i > 0 {
-                        i -= 1;
-                    }
+                    i = i.saturating_sub(1);
                     found = true;
                 } else if var_arr[i].borrow().scope > max_scope && var_arr[i].borrow().scope < scope
                 {
